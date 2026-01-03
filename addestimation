@@ -1,0 +1,509 @@
+// @ts-nocheck
+import React, {useState,useContext,useEffect,useLayoutEffect,} from "react";
+import {View,Text,TextInput,TouchableOpacity,FlatList,StyleSheet,Modal,Alert,} from "react-native";
+import { useRoute, useNavigation, RouteProp } from "@react-navigation/native";
+import { graphqlRequest } from "../services/api";
+import { UserContext } from "../components/ui/UserContext";
+import { useLogout } from "../hooks/Logout";
+import { openWhatsApp } from "../utils/whatsapp";
+import { LinearGradient } from 'expo-linear-gradient';
+
+/* ================= TYPES ================= */
+
+type RouteParams = {
+  AddEstimation: {
+    requestId: string;
+  };
+};
+
+type EstimationItem = {
+  id: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  amount: number;
+};
+
+type RepairRequest = {
+  itemName: string;
+  problemDescription: string;
+  contactInfo: string;
+};
+
+/* ================= COMPONENT ================= */
+
+export default function AddEstimation() {
+  const { token } = useContext(UserContext);
+  const navigation = useNavigation();
+  const logout = useLogout();
+
+  const route = useRoute<RouteProp<RouteParams, "AddEstimation">>();
+  const { requestId } = route.params;
+
+  const [request, setRequest] = useState<RepairRequest | null>(null);
+  const [items, setItems] = useState<EstimationItem[]>([]);
+  const [description, setDescription] = useState("");
+  const [quantity, setQuantity] = useState("");
+  const [unitPrice, setUnitPrice] = useState("");
+  const [successVisible, setSuccessVisible] = useState(false);
+
+  /* ================= HEADER ================= */
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerShown: false,
+    });
+  }, [navigation]);
+
+  /* ================= FETCH REQUEST ================= */
+
+  useEffect(() => {
+    const fetchRequest = async () => {
+      const query = `
+        query GetRepairRequest($requestId: String!) {
+          repairRequest(requestId: $requestId) {
+            itemName
+            problemDescription
+            contactInfo
+          }
+        }
+      `;
+      try {
+        const res = await graphqlRequest(query, { requestId }, token);
+        setRequest(res?.repairRequest || null);
+      } catch (err) {
+        console.log("FETCH REQUEST ERROR", err);
+      }
+    };
+
+    fetchRequest();
+  }, [requestId, token]);
+
+  /* ================= ADD ITEM ================= */
+
+  const handleAddItem = () => {
+    if (!description || !quantity || !unitPrice) {
+      Alert.alert("Error", "Please fill all fields");
+      return;
+    }
+
+    const qty = Number(quantity);
+    const price = Number(unitPrice);
+
+    if (qty <= 0 || price <= 0) {
+      Alert.alert("Error", "Quantity and price must be greater than zero");
+      return;
+    }
+
+    const newItem: EstimationItem = {
+      id: Date.now().toString(),
+      description,
+      quantity: qty,
+      unitPrice: price,
+      amount: qty * price,
+    };
+
+    setItems((prev) => [...prev, newItem]);
+    setDescription("");
+    setQuantity("");
+    setUnitPrice("");
+  };
+
+  /* ================= SAVE ESTIMATION ================= */
+
+
+  const handleSaveEstimation = async () => {
+    if (items.length === 0) {
+      Alert.alert("Error", "Please add at least one item");
+      return;
+    }
+    const totalAmount = items.reduce(
+      (sum, item) => sum + item.amount,
+      0
+    );
+
+    const mutation = `
+      mutation AddEstimationItem(
+        $repairRequestId: String!
+        $description: String!
+        $quantity: Int!
+        $unitPrice: Decimal!
+      ) {
+        addEstimationItem(
+          repairRequestId: $repairRequestId
+          description: $description
+          quantity: $quantity
+          unitPrice: $unitPrice
+        ) {
+          item {
+            id
+          }
+        }
+      }
+    `;
+
+    try {
+      for (const item of items) {
+        await graphqlRequest(
+          mutation,
+          {
+            repairRequestId: requestId,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+          },
+          token
+        );
+      }
+
+      setSuccessVisible(true); // ✅ SHOW POPUP
+    } catch (error) {
+      console.log("SAVE ESTIMATION ERROR", error);
+      Alert.alert("Error", "Failed to save estimation");
+    }
+  };
+
+  const total = items.reduce((sum, item) => sum + item.amount, 0);
+
+  /* ================= UI ================= */
+
+  return (
+    <View style={styles.container}>
+      {/* GRADIENT HEADER */}
+      <LinearGradient
+        colors={['#8B5CF6', '#7C3AED', '#6D28D9']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.header}
+      >
+        <View style={styles.headerTop}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Text style={styles.backIcon}>←</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Add Estimation</Text>
+          <TouchableOpacity onPress={logout}>
+            <Text style={styles.logoutText}>Logout</Text>
+          </TouchableOpacity>
+        </View>
+        
+        <View style={styles.headerContent}>
+          <Text style={styles.title}>Add Estimation</Text>
+          <Text style={styles.subtext}>Request ID: {requestId}</Text>
+        </View>
+      </LinearGradient>
+
+      {/* CARD */}
+      <View style={styles.cardContainer}>
+        <View style={styles.card}>
+          {/* TABLE HEADER */}
+          <View style={styles.tableHeader}>
+            <Text style={[styles.cell, styles.headerCell, { flex: 2 }]}>Description</Text>
+            <Text style={[styles.cell, styles.headerCell, { flex: 1 }]}>Qty</Text>
+            <Text style={[styles.cell, styles.headerCell, { flex: 1 }]}>Price</Text>
+            <Text style={[styles.cell, styles.headerCell, { flex: 1 }]}>Amount</Text>
+          </View>
+
+          {/* ITEMS */}
+          <FlatList
+            data={items}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <View style={styles.tableRow}>
+                <Text style={[styles.cell, { flex: 2 }]} numberOfLines={1}>
+                  {item.description}
+                </Text>
+                <Text style={[styles.cell, { flex: 1 }]}>{item.quantity}</Text>
+                <Text style={[styles.cell, { flex: 1 }]}>₹{item.unitPrice}</Text>
+                <Text style={[styles.cell, { flex: 1 }]}>₹{item.amount}</Text>
+              </View>
+            )}
+            style={styles.itemsList}
+          />
+
+          {/* ADD ROW */}
+          <View style={styles.inputRow}>
+            <TextInput
+              style={[styles.input, { flex: 2 }]}
+              placeholder="Description"
+              placeholderTextColor="#9CA3AF"
+              value={description}
+              onChangeText={setDescription}
+            />
+            <TextInput
+              style={[styles.input, { flex: 1 }]}
+              placeholder="Qty"
+              placeholderTextColor="#9CA3AF"
+              keyboardType="numeric"
+              value={quantity}
+              onChangeText={setQuantity}
+            />
+            <TextInput
+              style={[styles.input, { flex: 1 }]}
+              placeholder="Price"
+              placeholderTextColor="#9CA3AF"
+              keyboardType="numeric"
+              value={unitPrice}
+              onChangeText={setUnitPrice}
+            />
+            <TouchableOpacity style={styles.addButton} onPress={handleAddItem}>
+              <Text style={styles.addText}>+</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* TOTAL */}
+          <View style={styles.totalContainer}>
+            <Text style={styles.totalText}>TOTAL: ₹{total.toFixed(2)}</Text>
+          </View>
+
+          {/* SAVE BUTTON */}
+          <TouchableOpacity style={styles.saveButton} onPress={handleSaveEstimation}>
+            <Text style={styles.saveButtonText}>Save Estimation</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* SUCCESS MODAL */}
+      <Modal transparent visible={successVisible} animationType="fade">
+        <View style={styles.popupContainer}>
+          <View style={styles.popupBox}>
+            <Text style={styles.popupTitle}>Estimation Saved!</Text>
+            <Text style={styles.popupMessage}>
+              Do you want to send estimation to customer via WhatsApp?
+            </Text>
+
+            <View style={styles.buttonRow}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => setSuccessVisible(false)}
+              >
+                <Text style={styles.modalButtonText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalButton, styles.sendButton]}
+                onPress={() => {
+                  setSuccessVisible(false);
+                  const itemsText = items
+                    .map(
+                      (item, index) =>
+                        `${index + 1}. ${item.description}
+Qty: ${item.quantity}
+Unit Price: ₹${item.unitPrice}
+Amount: ₹${item.amount}`
+                    )
+                    .join("\n\n");
+                  openWhatsApp(
+                    request?.contactInfo,
+                    `Service Request: ${request?.itemName}
+Problem: ${request?.problemDescription}
+Estimation Details:
+${itemsText}
+
+Total: ₹${total.toFixed(2)}
+
+Reply ACCEPT or REJECT`
+                  );
+                  setItems([]);
+                }}
+              >
+                <Text style={styles.modalButtonText}>Send</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+/* ================= STYLES ================= */
+
+const styles = StyleSheet.create({
+  container: { 
+    flex: 1, 
+    backgroundColor: "#F3F4F6" 
+  },
+  header: {
+    paddingTop: 50,
+    paddingBottom: 80,
+    paddingHorizontal: 20,
+  },
+  headerTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 30,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  backIcon: {
+    fontSize: 24,
+    color: "#FFF",
+  },
+  headerTitle: {
+    fontSize: 18,
+    color: "#FFF",
+    flex: 1,
+    textAlign: "center",
+  },
+  logoutText: {
+    color: "#EF4444",
+    fontWeight: "600",
+  },
+  headerContent: {
+    alignItems: "center",
+  },
+  title: { 
+    fontSize: 22, 
+    fontWeight: "bold", 
+    color: "#FFF",
+    marginBottom: 8,
+  },
+  subtext: { 
+    color: "#E9D5FF", 
+    fontSize: 14,
+  },
+  cardContainer: {
+    flex: 1,
+    marginTop: -60,
+    paddingHorizontal: 20,
+  },
+  card: {
+    backgroundColor: "#FFF",
+    padding: 16,
+    borderRadius: 24,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  tableHeader: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderColor: "#E5E7EB",
+    paddingBottom: 12,
+    marginBottom: 8,
+  },
+  headerCell: {
+    color: "#374151",
+    fontWeight: "500",
+  },
+  tableRow: {
+    flexDirection: "row",
+    paddingVertical: 8,
+    borderBottomWidth: 0.5,
+    borderColor: "#F3F4F6",
+  },
+  cell: { 
+    fontSize: 14,
+    color: "#6B7280",
+  },
+  itemsList: {
+    maxHeight: 180,
+    marginBottom: 12,
+  },
+  inputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 12,
+    gap: 8,
+  },
+  input: {
+    backgroundColor: "#F9FAFB",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 14,
+  },
+  addButton: {
+    backgroundColor: "#3B82F6",
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  addText: { 
+    fontSize: 24, 
+    color: "#FFF",
+    fontWeight: "500",
+  },
+  totalContainer: {
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderColor: "#E5E7EB",
+    marginTop: 12,
+  },
+  totalText: { 
+    fontSize: 18, 
+    fontWeight: "bold",
+    color: "#111827",
+  },
+  saveButton: {
+    backgroundColor: "#4ADE80",
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    marginTop: 16,
+  },
+  saveButtonText: { 
+    color: "#111827", 
+    fontSize: 16, 
+    fontWeight: "600" 
+  },
+
+  popupContainer: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  popupBox: {
+    backgroundColor: "#FFF",
+    padding: 24,
+    borderRadius: 16,
+    width: "100%",
+    maxWidth: 400,
+  },
+  popupTitle: { 
+    fontSize: 20, 
+    fontWeight: "bold", 
+    marginBottom: 12,
+    color: "#111827",
+  },
+  popupMessage: { 
+    fontSize: 14, 
+    marginBottom: 24,
+    color: "#6B7280",
+    lineHeight: 20,
+  },
+  buttonRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  cancelButton: {
+    backgroundColor: "#9CA3AF",
+  },
+  sendButton: {
+    backgroundColor: "#4ADE80",
+  },
+  modalButtonText: { 
+    color: "#111827", 
+    fontWeight: "600",
+    fontSize: 15,
+  },
+});
