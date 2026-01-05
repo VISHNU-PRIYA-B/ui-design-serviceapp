@@ -18,6 +18,7 @@ import graphql_jwt
 from .utils.pdf_generator import create_invoice_pdf
 import base64
 from django.core.files.base import ContentFile
+from django.core.mail import send_mail
 
 
 class UserFilter(django_filters.FilterSet):
@@ -53,9 +54,28 @@ class UserType(DjangoObjectType):
         return self.company_name
     
 class CompanyProfileType(DjangoObjectType):
+    seal = graphene.String()
+    authorizedSignature = graphene.String()
     class Meta:
         model = CompanyProfile
-        fields = "__all__"
+        fields =("id","owner_name","company_name","address","phone","profile_pic","seal","authorized_signature")
+
+    def resolve_seal(self,info):
+        try:
+            if self.seal:
+                return info.context.build_absolute_uri(self.seal.url)
+        except:
+            return None
+        return None
+    
+    def resolve_authorizedSignature(self,info):
+        try:
+            if self.authorized_signature:
+                return info.context.build_absolute_uri(self.authorized_signature.url)
+        except:
+            return None
+        return None
+      
 
 # class RepairRequestType(DjangoObjectType):
 #     estimation = graphene.Field(lambda: EstimationType)
@@ -291,13 +311,14 @@ class CustomTokenAuth(graphene.Mutation):
         try:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
-            return CustomTokenAuth(success=False, message="Invalid email or password", token=None, user=None)
+            return CustomTokenAuth(success=False, message="Account does not exist", token=None, user=None)
 
         if not user.check_password(password):
-            return CustomTokenAuth(success=False, message="Invalid email or password", token=None, user=None)
+            return CustomTokenAuth(success=False, message="Invalid password", token=None, user=None)
 
         token = get_token(user)
         return CustomTokenAuth(success=True, message="Login successful", token=token, user=user)
+    
     
 class UpdateProfile(graphene.Mutation):
     user = graphene.Field(UserType)
@@ -599,16 +620,13 @@ class CreateOrUpdateCompanyProfile(graphene.Mutation):
         if not user.admin:
             raise GraphQLError("Only admin can modify company profile")
 
-        # ✅ Step 1: get or create profile FIRST
         profile, _ = CompanyProfile.objects.get_or_create(user=user)
 
-        # ✅ Step 2: assign normal fields
         profile.owner_name = owner_name
         profile.company_name = company_name
         profile.address = address
         profile.phone = phone
 
-        # ✅ Step 3: assign files ONLY if present
         if profile_pic is not None:
             profile.profile_pic = profile_pic
 
@@ -618,7 +636,6 @@ class CreateOrUpdateCompanyProfile(graphene.Mutation):
         if authorized_signature is not None:
             profile.authorized_signature = authorized_signature
 
-        # ✅ Step 4: save ONCE
         profile.save()
 
         return CreateOrUpdateCompanyProfile(
