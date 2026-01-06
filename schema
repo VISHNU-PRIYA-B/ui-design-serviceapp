@@ -8,7 +8,7 @@ from graphql_jwt.shortcuts import get_token
 from graphene_django.types import DjangoObjectType
 from graphql_jwt.decorators import login_required
 from graphene_django.filter import DjangoFilterConnectionField
-from .models import User,RepairRequest,Estimation, Invoice , Estimationitems,Updaterepairstatus,Invoice, CompanyProfile
+from .models import User,RepairRequest,Estimation, Invoice , Estimationitems,Updaterepairstatus,Invoice, CompanyProfile, PasswordResetOTP
 from django.utils.crypto import get_random_string
 from decimal import Decimal
 from graphql import GraphQLError
@@ -19,6 +19,9 @@ from .utils.pdf_generator import create_invoice_pdf
 import base64
 from django.core.files.base import ContentFile
 from django.core.mail import send_mail
+from django.conf import settings as SETTING
+from django.contrib.auth import get_user_model
+import random
 
 
 class UserFilter(django_filters.FilterSet):
@@ -60,22 +63,19 @@ class CompanyProfileType(DjangoObjectType):
         model = CompanyProfile
         fields =("id","owner_name","company_name","address","phone","profile_pic","seal","authorized_signature")
 
-    def resolve_seal(self,info):
-        try:
-            if self.seal:
-                return info.context.build_absolute_uri(self.seal.url)
-        except:
-            return None
+    def resolve_seal(self, info):
+        if self.seal:
+
+            return info.context.build_absolute_uri(self.seal.url)
+        return None 
+
+
+    def resolve_authorized_signature(self, info):
+        if self.authorized_signature:
+            return info.context.build_absolute_uri(self.authorized_signature.url)
         return None
-    
-    def resolve_authorizedSignature(self,info):
-        try:
-            if self.authorized_signature:
-                return info.context.build_absolute_uri(self.authorized_signature.url)
-        except:
-            return None
-        return None
-      
+        
+
 
 # class RepairRequestType(DjangoObjectType):
 #     estimation = graphene.Field(lambda: EstimationType)
@@ -318,8 +318,81 @@ class CustomTokenAuth(graphene.Mutation):
 
         token = get_token(user)
         return CustomTokenAuth(success=True, message="Login successful", token=token, user=user)
-    
-    
+
+class SendPasswordOTP(graphene.Mutation):
+    success = graphene.Boolean()
+    message = graphene.String()
+
+    class Arguments:
+        email = graphene.String(required=True)
+
+    def mutate(self, info, email):
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return SendPasswordOTP(
+                success=True,
+                message="If the email exists, OTP has been sent"
+            )
+
+        # delete old OTPs
+        PasswordResetOTP.objects.filter(user=user).delete()
+
+        otp = str(random.randint(100000, 999999))
+
+        PasswordResetOTP.objects.create(
+            user=user,
+            otp=otp
+        )
+
+        send_mail(
+            subject="Password Reset OTP",
+            message=f"Your OTP is {otp}. Valid for 5 minutes.",
+            from_email=SETTING.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+        )
+
+        return SendPasswordOTP(
+            success=True,
+            message="OTP sent to your email"
+        )
+
+class ResetPasswordWithOTP(graphene.Mutation):
+    success = graphene.Boolean()
+    message = graphene.String()
+
+    class Arguments:
+        email = graphene.String(required=True)
+        otp = graphene.String(required=True)
+        password = graphene.String(required=True)
+
+    def mutate(self, info, email, otp, password):
+        try:
+            user = User.objects.get(email=email)
+            reset_otp = PasswordResetOTP.objects.get(user=user, otp=otp)
+        except (User.DoesNotExist, PasswordResetOTP.DoesNotExist):
+            return ResetPasswordWithOTP(
+                success=False,
+                message="Invalid OTP"
+            )
+
+        if reset_otp.expired():
+            reset_otp.delete()
+            return ResetPasswordWithOTP(
+                success=False,
+                message="OTP expired"
+            )
+
+        user.set_password(password)
+        user.save()
+
+        reset_otp.delete()
+
+        return ResetPasswordWithOTP(
+            success=True,
+            message="Password reset successful"
+        )
+
 class UpdateProfile(graphene.Mutation):
     user = graphene.Field(UserType)
     success = graphene.Boolean()
@@ -649,6 +722,9 @@ class Mutation(graphene.ObjectType):
     create_user = CreateUser.Field()
     custom_token_auth = CustomTokenAuth.Field()
     create_repair_request = CreateRepairRequest.Field()
+
+    send_password_otp = SendPasswordOTP.Field()
+    reset_password_with_otp = ResetPasswordWithOTP.Field()
 
     update_profile = UpdateProfile.Field()
     #create_estimation = CreateEstimation.Field()
