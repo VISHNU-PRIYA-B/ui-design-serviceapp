@@ -1,0 +1,312 @@
+// @ts-nocheck
+import React, { useEffect, useState } from "react";
+import {View,Text,StyleSheet,ScrollView,ActivityIndicator,TouchableOpacity,} from "react-native";
+import { graphqlRequest } from "../services/api";
+import { useRoute, useNavigation } from "@react-navigation/native";
+import { UserContext } from "../components/ui/UserContext";
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
+
+export default function AdminEstimation() {
+  const route = useRoute();
+  const { requestId } = route.params || {};
+  const [estimation, setEstimation] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const navigation = useNavigation();
+
+  useEffect(() => {
+    if (requestId) fetchEstimation();
+  }, [requestId]);
+
+  const fetchEstimation = async () => {
+    const query = `
+      query($id: ID!) {
+        adminEstimation(requestId: $id) {
+          id
+          total
+          approved
+          repairRequest {
+            itemName
+            problemDescription
+            status
+          }
+          items {
+            id
+            description
+            unitPrice
+            quantity
+            amount
+          }
+        }
+      }
+    `;
+
+    try {
+      const res = await graphqlRequest(query, { id: requestId });
+      setEstimation(res?.adminEstimation || null);
+    } catch (err) {
+      console.log("Fetch error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case "READY_TO_DELIVER":
+        return { bg: "#FFF0D5", text: "#C37400" };
+      case "REPAIRING":
+        return { bg: "#D6E9FF", text: "#185ABC" };
+      case "STARTED":
+        return { bg: "#DFF5E1", text: "#2F6B3F" };
+      default:
+        return { bg: "#EEE", text: "#555" };
+    }
+  };
+
+  if (loading) {
+    return (
+      <LinearGradient colors={['#8B5CF6', '#7C3AED']} style={styles.gradientContainer}>
+        <ActivityIndicator size="large" color="#fff" style={{ marginTop: 50 }} />
+      </LinearGradient>
+    );
+  }
+
+  if (!estimation) {
+    return (
+      <LinearGradient colors={['#8B5CF6', '#7C3AED']} style={styles.gradientContainer}>
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>No estimation found</Text>
+        </View>
+      </LinearGradient>
+    );
+  }
+
+  const request = estimation.repairRequest;
+  const statusColor = getStatusColor(request.status);
+
+  return (
+    <LinearGradient colors={['#8B5CF6', '#7C3AED']} style={styles.gradientContainer}>
+      <ScrollView style={styles.scrollView}>
+        {/* Header Section */}
+        <View style={styles.header}>
+          <TouchableOpacity>
+            
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Admin Estimation</Text>
+          <Text style={styles.headerSubtitle}>Review repair details</Text>
+        </View>
+
+        {/* Content Card */}
+        <View style={styles.contentContainer}>
+          <View style={styles.card}>
+            {/* Title */}
+            <Text style={styles.title}>{request.itemName}</Text>
+
+            {/* Problem */}
+            <Text style={styles.label}>
+              Problem: <Text style={styles.value}>{request.problemDescription}</Text>
+            </Text>
+
+            {/* Status */}
+            <View
+              style={[
+                styles.statusChip,
+                { backgroundColor: statusColor.bg },
+              ]}
+            >
+              <Text style={[styles.statusText, { color: statusColor.text }]}>
+                {request.status}
+              </Text>
+            </View>
+
+            {/* Estimation header */}
+            <Text style={styles.sectionTitle}>Estimation</Text>
+            <View style={styles.line} />
+
+            {/* Estimation items */}
+            {estimation.items.map((item) => (
+              <View key={item.id} style={styles.row}>
+                <View style={styles.itemDetails}>
+                  <Text style={styles.itemName}>{item.description}</Text>
+                  <Text style={styles.subText}>
+                    {item.quantity} × ₹{item.unitPrice}
+                  </Text>
+                </View>
+                <Text style={styles.amount}>₹{item.amount}</Text>
+              </View>
+            ))}
+
+            {/* Total Section */}
+            <View style={styles.totalRow}>
+              <Text style={styles.totalLabel}>Total:</Text>
+              <Text style={styles.totalAmount}>₹{estimation.total}</Text>
+            </View>
+
+            {/* UPDATE STATUS BUTTON */}
+            {request.status !== "REJECTED" && (
+              <TouchableOpacity
+                style={styles.updateBtn}
+                onPress={() => {
+                  const repairData = {
+                    requestId,
+                    title: request.itemName,
+                    problem: request.problemDescription,
+                    status: request.status,
+                    items: estimation.items,
+                    total: estimation.total,
+                  };
+
+                  navigation.navigate("UpdateStatus", {
+                    requestId: requestId,
+                  });
+                }}
+              >
+                <Text style={styles.updateBtnText}>Update Status</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      </ScrollView>
+    </LinearGradient>
+  );
+}
+
+const styles = StyleSheet.create({
+  gradientContainer: {
+    flex: 1,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  header: {
+    paddingHorizontal: 24,
+    paddingTop: 48,
+    paddingBottom: 32,
+  },
+  backButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  headerTitle: {
+    fontSize: 28,
+    color: '#fff',
+    marginBottom: 8,
+  },
+  headerSubtitle: {
+    fontSize: 18,
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  contentContainer: {
+    paddingHorizontal: 24,
+    paddingBottom: 48,
+  },
+  card: {
+    backgroundColor: "#fff",
+    padding: 24,
+    borderRadius: 24,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  title: {
+    fontSize: 24,
+    marginBottom: 16,
+  },
+  label: { 
+    fontSize: 16, 
+    marginTop: 4,
+    color: '#374151',
+  },
+  value: { 
+    color: '#111827',
+  },
+  statusChip: {
+    alignSelf: "flex-start",
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  statusText: { 
+    fontSize: 14,
+  },
+  sectionTitle: {
+    marginTop: 24,
+    fontSize: 20,
+    marginBottom: 16,
+  },
+  line: {
+    height: 1,
+    backgroundColor: "#E5E7EB",
+    marginBottom: 16,
+  },
+  row: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    alignItems: 'flex-start',
+  },
+  itemDetails: {
+    flex: 1,
+  },
+  itemName: { 
+    fontSize: 16,
+    color: '#111827',
+    marginBottom: 4,
+  },
+  subText: { 
+    color: "#6B7280", 
+    fontSize: 14,
+  },
+  amount: { 
+    fontSize: 16,
+    color: '#111827',
+    marginLeft: 12,
+  },
+  totalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    borderTopWidth: 1,
+    borderColor: "#D1D5DB",
+    paddingTop: 16,
+    marginTop: 16,
+  },
+  totalLabel: { 
+    fontSize: 20,
+  },
+  totalAmount: { 
+    fontSize: 20,
+  },
+  updateBtn: {
+    backgroundColor: "#3ff7ba",
+    paddingVertical: 16,
+    borderRadius: 16,
+    marginTop: 24,
+  },
+  updateBtnText: {
+    textAlign: "center",
+    fontSize: 17,
+    color: "#111827",
+  },
+  errorBox: { 
+    marginTop: 40, 
+    alignItems: "center",
+    backgroundColor: '#fff',
+    padding: 32,
+    borderRadius: 24,
+    marginHorizontal: 24,
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#111827',
+  },
+});
