@@ -1,50 +1,29 @@
 // @ts-nocheck
 import React, { useEffect, useState, useContext, useLayoutEffect } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Alert,
-  ActivityIndicator,
-  Linking,
-  ScrollView,
-} from "react-native";
+import {View,Text,StyleSheet,TouchableOpacity,Alert,ActivityIndicator,Linking,ScrollView,} from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { graphqlRequest, setAuthToken } from "../services/api";
+import { graphqlRequest, setAuthToken, BACKEND_BASE_URL } from "../services/api";
 import { UserContext } from "../components/ui/UserContext";
 import { useLogout } from "../hooks/Logout";
-import { useNavigation } from "@react-navigation/native";
+import { useRoute, useNavigation } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { BACKEND_BASE_URL } from "../services/api";
 
 /* COLORS */
 const COLORS = {
   gradientStart: "#8B7FE8",
   gradientEnd: "#A89DEF",
   white: "#FFFFFF",
-  primary: "#7B6EF6",
-  accent: "#C7F36B",
   textDark: "#1E1E1E",
   textMuted: "#8A8A8A",
   cardBg: "#FFFFFF",
   cardBorder: "#ECECF3",
   sectionBg: "#F7F8FC",
   success: "#27AE60",
-  successDark: "#1E8449",
   danger: "#E74C3C",
-  dangerDark: "#C0392B",
   link: "#3498DB",
-  
-  // Status colors
+
   pending: "#FFF3CD",
   pendingText: "#856404",
-  started: "#DFF5E1",
-  startedText: "#155724",
-  repairing: "#CCE4FF",
-  repairingText: "#004085",
-  testing: "#CFF4FC",
-  testingText: "#0C5460",
   ready: "#E5D9F2",
   readyText: "#6B4B9E",
   rejected: "#F8D7DA",
@@ -52,114 +31,126 @@ const COLORS = {
 };
 
 export default function ApproveEstimation() {
-  const { token: contextToken } = useContext(UserContext);
-  const [estimations, setEstimations] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const logout = useLogout();
-  const navigation = useNavigation();
+  const route = useRoute<any>();
+  const { requestId } = route.params;
 
-  /* LOGOUT */
+  const { token: contextToken } = useContext(UserContext);
+  const navigation = useNavigation();
+  const logout = useLogout();
+
+  const [estimation, setEstimation] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  /* HEADER */
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
         <TouchableOpacity onPress={logout} style={{ marginRight: 15 }}>
-          <Text style={{ color: "#E74C3C", fontWeight: "bold", fontSize: 15 }}>
-            Logout
-          </Text>
+          <Text style={{ color: "#E74C3C", fontWeight: "bold" }}>Logout</Text>
         </TouchableOpacity>
       ),
     });
   }, []);
 
-  /* FETCH */
-  const fetchMyEstimations = async () => {
-    const token = contextToken || (await AsyncStorage.getItem("token"));
-    if (!token) return;
+  /* FETCH SINGLE ESTIMATION */
+  const fetchMyEstimation = async () => {
+  const token = contextToken || (await AsyncStorage.getItem("token"));
 
-    setAuthToken(token);
-    setLoading(true);
+  if (!token || !requestId) {
+    console.log("Missing token or estimationId");
+    setLoading(false);
+    return;
+  }
 
-    const query = `
-      query {
-        myEstimations {
-          id
-          total
-          invoice {
-          invoiceNumber
-          pdfUrl }
-          repairRequest {
-            requestId
-            itemName
-            problemDescription
-            createdAt
-            status
+  setAuthToken(token);
+  setLoading(true);
+
+  const query = `
+    query MyEstimation($requestId: String!) {
+  myEstimation(requestId: $requestId) {
+    id
+    total
+    approved
+    invoice {
+      invoiceNumber
+      pdfUrl
+    }
+    repairRequest {
+      requestId
+      itemName
+      problemDescription
+      status
+      createdAt
+    }
+    items {
+      id
+      description
+      quantity
+      unitPrice
+      amount
+    }
+  }
+}
+
+  `;
+
+  try {
+    const res = await graphqlRequest(query, { requestId });
+    console.log("Fetched estimation:", res);
+    setEstimation(res?.myEstimation || []);
+  } catch (e) {
+    Alert.alert("No estimation has been added");
+  } finally {
+    setLoading(false);
+  }
+};
+
+
+  useEffect(() => {
+    fetchMyEstimation();
+  }, [requestId]);
+
+  /* APPROVE / REJECT */
+const updateApproval = async (approved) => {
+  try {
+    const mutation = `
+      mutation ApproveEstimation($requestId: String!, $approved: Boolean!) {
+        approveEstimation(requestId: $requestId, approved: $approved) {
+          success
+          estimation {
+            id
           }
-          items { 
-          id 
-          description 
-          quantity
-          unitPrice
-          amount }
         }
       }
     `;
 
-    try {
-      const res = await graphqlRequest(query);
-      setEstimations(res?.myEstimations || []);
-    } catch {
-      Alert.alert("Error", "Failed to fetch estimations");
-    } finally {
-      setLoading(false);
-    }
-  };
+    await graphqlRequest(mutation, {
+      requestId,
+      approved,
+    });
 
-  useEffect(() => {
-    fetchMyEstimations();
-  }, []);
+    Alert.alert(
+      "Success",
+      approved ? "Estimation approved" : "Estimation rejected"
+    );
 
-  /* ACTION */
-  const updateApproval = async (requestId: string, approved: boolean) => {
-    try {
-      const mutation = `
-        mutation {
-          approveEstimation(requestId: "${requestId}", approved: ${approved}) {
-            success
-          }
-        }
-      `;
-      await graphqlRequest(mutation);
-      Alert.alert(
-        "Success",
-        approved ? "Estimation approved!" : "Estimation rejected"
-      );
-      fetchMyEstimations();
-    } catch {
-      Alert.alert("Error", "Action failed");
-    }
-  };
+    fetchMyEstimation();
+  } catch (e) {
+    console.error("Approve error", e);
+    Alert.alert("Error", "Action failed");
+  }
+};
 
-  const getStatusColors = (status: string) => {
-    switch (status) {
-      case "PENDING":
-        return { bg: COLORS.pending, text: COLORS.pendingText };
-      case "STARTED":
-        return { bg: COLORS.started, text: COLORS.startedText };
-      case "REPAIRING":
-        return { bg: COLORS.repairing, text: COLORS.repairingText };
-      case "TESTING":
-        return { bg: COLORS.testing, text: COLORS.testingText };
-      case "READY_TO_DELIVER":
-        return { bg: COLORS.ready, text: COLORS.readyText };
-      case "REJECTED":
-        return { bg: COLORS.rejected, text: COLORS.rejectedText };
-      default:
-        return { bg: "#EEE", text: "#333" };
-    }
-  };
 
-  const formatStatus = (status: string) => {
-    return status.replaceAll("_", " ");
+  const getStatusStyle = (status: string) => {
+  
+    if (status === "PENDING")
+      return { bg: COLORS.pending, text: COLORS.pendingText };
+    if (status === "READY_TO_DELIVER")
+      return { bg: COLORS.ready, text: COLORS.readyText };
+    if (status === "REJECTED")
+      return { bg: COLORS.rejected, text: COLORS.rejectedText };
+    return { bg: "#EEE", text: "#333" };
   };
 
   /* LOADING */
@@ -169,210 +160,113 @@ export default function ApproveEstimation() {
         colors={[COLORS.gradientStart, COLORS.gradientEnd]}
         style={styles.center}
       >
-        <ActivityIndicator size="large" color={COLORS.white} />
-        <Text style={styles.loadingText}>Loading estimations...</Text>
+        <ActivityIndicator size="large" color="#FFF" />
+        <Text style={{ color: "#FFF", marginTop: 10 }}>Loading estimation…</Text>
       </LinearGradient>
     );
   }
 
-  if (!estimations.length) {
+  if (!estimation) {
     return (
-      <LinearGradient
-        colors={[COLORS.gradientStart, COLORS.gradientEnd]}
-        style={styles.center}
-      >
-        <Text style={styles.emptyIcon}>📋</Text>
-        <Text style={styles.emptyTitle}>No Estimations</Text>
-        <Text style={styles.emptyMessage}>
-          You don't have any estimations to review yet
-        </Text>
-      </LinearGradient>
+      <View style={styles.center}>
+        <Text>No estimation found</Text>
+      </View>
     );
   }
 
-  /* GROUP BY DATE */
-  // SORT LATEST FIRST
-const sortedEstimations = [...estimations].sort(
-  (a, b) =>
-    new Date(b.repairRequest.createdAt).getTime() -
-    new Date(a.repairRequest.createdAt).getTime()
-);
+  const statusStyle = getStatusStyle(estimation.repairRequest.status);
 
-  const groupedData = sortedEstimations.reduce((acc, item) => {
-    const dateKey = new Date(
-      item.repairRequest.createdAt
-    ).toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-
-    if (!acc[dateKey]) acc[dateKey] = [];
-    acc[dateKey].push(item);
-    return acc;
-  }, {});
-
-  /* UI */
   return (
     <LinearGradient
       colors={[COLORS.gradientStart, COLORS.gradientEnd]}
       style={styles.container}
     >
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.contentContainer}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Approve Estimations</Text>
-          <Text style={styles.headerSubtitle}>
-            {estimations.length} {estimations.length === 1 ? "estimation" : "estimations"} pending
-          </Text>
-        </View>
+      <ScrollView contentContainerStyle={styles.content}>
+        <Text style={styles.headerTitle}>Approve Estimation</Text>
 
-        {/* Grouped Cards */}
-        {Object.keys(groupedData).map((date) => (
-          <View key={date} style={styles.dateSection}>
-            <View style={styles.dateHeaderContainer}>
-              <View style={styles.dateDivider} />
-              <Text style={styles.dateHeader}>{date}</Text>
-              <View style={styles.dateDivider} />
+        <View style={styles.card}>
+          {/* HEADER */}
+          <View style={styles.cardHeader}>
+            <Text style={styles.itemName}>
+              {estimation.repairRequest.itemName}
+            </Text>
+
+            <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
+              <Text style={[styles.statusText, { color: statusStyle.text }]}>
+                {estimation.repairRequest.status.replaceAll("_", " ")}
+              </Text>
             </View>
-
-            {groupedData[date].map((item) => {
-              const total =
-                item.items?.reduce(
-                  (s: number, i: any) => s + Number(i.amount),
-                  0
-                ) || item.total;
-              const statusColors = getStatusColors(item.repairRequest.status);
-
-              return (
-                <View key={item.id} style={styles.cardOuter}>
-                  <View style={styles.card}>
-                    {/* Header */}
-                    <View style={styles.cardHeader}>
-                      <View style={styles.titleContainer}>
-                        <Text style={styles.itemName} numberOfLines={2}>
-                          {item.repairRequest.itemName}
-                        </Text>
-                      </View>
-                      <View
-                        style={[
-                          styles.statusBadge,
-                          { backgroundColor: statusColors.bg },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.statusText,
-                            { color: statusColors.text },
-                          ]}
-                        >
-                          {formatStatus(item.repairRequest.status)}
-                        </Text>
-                      </View>
-                    </View>
-
-                    {/* Problem Description */}
-                    {item.repairRequest.problemDescription && (
-                      <View style={styles.problemBox}>
-                        <Text style={styles.problemLabel}>Problem</Text>
-                        <Text style={styles.problemText}>
-                          {item.repairRequest.problemDescription}
-                        </Text>
-                      </View>
-                    )}
-
-                    {/* Items List */}
-                    {item.items && item.items.length > 0 && (
-                      <View style={styles.itemsContainer}>
-                        <Text style={styles.itemsLabel}>Estimation Items</Text>
-                        {item.items.map((i: any) => (
-                          <View key={i.id} style={styles.itemRow}>
-                            <View style={styles.itemDetails}>
-                              <Text style={styles.itemDescription}>
-                                {i.description}
-                              </Text>
-                              <Text style={styles.itemQuantity}>
-                                Qty: {i.quantity} × ₹{i.unitPrice}
-                              </Text>
-                            </View>
-                            <Text style={styles.itemAmount}>₹{i.amount}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    )}
-
-                    {/* Total */}
-                    <View style={styles.totalContainer}>
-                      <Text style={styles.totalLabel}>Total Amount</Text>
-                      <Text style={styles.totalValue}>₹{total}</Text>
-                    </View>
-
-                    {/* Invoice Link */}
-                    {item.invoice?.pdfUrl && (
-                      <TouchableOpacity
-                        style={styles.invoiceButton}
-                        onPress={() => {
-                          const pdfPath = item.invoice.pdfUrl;
-                          const fullUrl = pdfPath.startsWith("http")
-                            ? pdfPath
-                            : `${BACKEND_BASE_URL}${pdfPath}`;
-
-                          console.log("Opening PDF:", fullUrl);
-
-                          Linking.openURL(fullUrl).catch((err) => {
-                            console.error("Error opening PDF:", err);
-                            Alert.alert("Error", "Unable to open invoice PDF.");
-                          });
-                        }}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={styles.invoiceText}>📄 View Invoice</Text>
-                      </TouchableOpacity>
-                    )}
-
-                    {/* Action Buttons */}
-                    {item.repairRequest.status === "PENDING" && (
-                      <>
-                        <View style={styles.divider} />
-                        <View style={styles.buttonContainer}>
-                          <TouchableOpacity
-                            style={styles.acceptButton}
-                            onPress={() =>
-                              updateApproval(item.repairRequest.requestId, true)
-                            }
-                            activeOpacity={0.8}
-                          >
-                            <Text style={styles.acceptText}>✓ Accept</Text>
-                          </TouchableOpacity>
-
-                          <TouchableOpacity
-                            style={styles.rejectButton}
-                            onPress={() =>
-                              updateApproval(
-                                item.repairRequest.requestId,
-                                false
-                              )
-                            }
-                            activeOpacity={0.8}
-                          >
-                            <Text style={styles.rejectText}>✕ Reject</Text>
-                          </TouchableOpacity>
-                        </View>
-                      </>
-                    )}
-                  </View>
-                </View>
-              );
-            })}
           </View>
-        ))}
 
-        {/* Bottom Padding */}
-        <View style={styles.bottomPadding} />
+          {/* PROBLEM */}
+          <View style={styles.problemBox}>
+            <Text style={styles.problemLabel}>Problem</Text>
+            <Text style={styles.problemText}>
+              {estimation.repairRequest.problemDescription}
+            </Text>
+          </View>
+
+          {/* ITEMS */}
+          {estimation.items.map((i: any) => (
+            <View key={i.id} style={styles.itemRow}>
+              <View>
+                <Text style={styles.itemDesc}>{i.description}</Text>
+                <Text style={styles.itemQty}>
+                  {i.quantity} × ₹{i.unitPrice}
+                </Text>
+              </View>
+              <Text style={styles.itemAmt}>₹{i.amount}</Text>
+            </View>
+          ))}
+
+          {/* TOTAL */}
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Total</Text>
+            <Text style={styles.totalValue}>₹{estimation.total}</Text>
+          </View>
+
+          {/* INVOICE */}
+          {estimation.invoice?.pdfUrl && (
+            <TouchableOpacity
+              style={styles.invoiceBtn}
+              onPress={() =>
+                Linking.openURL(`${BACKEND_BASE_URL}${estimation.invoice.pdfUrl}`)
+              }
+            >
+              <Text style={styles.invoiceText}>📄 View Invoice</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* ACTIONS */}
+          {estimation.repairRequest.status === "PENDING" && (
+            <View style={styles.actionRow}>
+              <TouchableOpacity
+                style={styles.acceptBtn}
+                onPress={() => updateApproval(true)}
+              >
+                <Text style={styles.actionText}>✓ Accept</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.rejectBtn}
+                onPress={() => updateApproval(false)}
+              >
+                <Text style={styles.actionText}>✕ Reject</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          {/* update status */}
+          {estimation.repairRequest.status !=="REJECTED" &&(
+            <TouchableOpacity style={styles.updateBtn}
+            onPress={()=>{
+              navigation.navigate("UpdateStatus",{
+                requestId: requestId,
+              });
+            }}>
+              <Text style={styles.updateBtnText}>Update Status</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </ScrollView>
     </LinearGradient>
   );
@@ -380,314 +274,131 @@ const sortedEstimations = [...estimations].sort(
 
 /* STYLES */
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-
-  scrollView: {
-    flex: 1,
-  },
-
-  contentContainer: {
-    padding: 16,
-  },
-
-  center: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 32,
-  },
-
-  loadingText: {
-    marginTop: 16,
-    fontSize: 14,
-    color: COLORS.white,
-    opacity: 0.9,
-  },
-
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: COLORS.white,
-    marginBottom: 8,
-  },
-
-  emptyMessage: {
-    fontSize: 14,
-    color: COLORS.white,
-    textAlign: "center",
-    lineHeight: 20,
-    opacity: 0.9,
-  },
-
-  header: {
-    marginBottom: 24,
-    paddingHorizontal: 4,
-  },
+  container: { flex: 1 },
+  content: { padding: 16 },
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
 
   headerTitle: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: "700",
-    color: COLORS.white,
-    marginBottom: 4,
-  },
-
-  headerSubtitle: {
-    fontSize: 14,
-    color: COLORS.white,
-    opacity: 0.8,
-  },
-
-  dateSection: {
-    marginBottom: 32,
-  },
-
-  dateHeaderContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 16,
-    paddingHorizontal: 4,
-  },
-
-  dateDivider: {
-    flex: 1,
-    height: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.3)",
-  },
-
-  dateHeader: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: COLORS.white,
-    marginHorizontal: 12,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    opacity: 0.9,
-  },
-
-  cardOuter: {
-    marginBottom: 16,
+    color: "#FFF",
+    marginBottom: 20,
   },
 
   card: {
     backgroundColor: COLORS.cardBg,
-    borderRadius: 22,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
+    borderRadius: 20,
+    padding: 18,
   },
 
   cardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "flex-start",
     marginBottom: 12,
-  },
-
-  titleContainer: {
-    flex: 1,
-    paddingRight: 12,
   },
 
   itemName: {
     fontSize: 18,
     fontWeight: "700",
     color: COLORS.textDark,
-    lineHeight: 24,
   },
 
   statusBadge: {
-    paddingVertical: 6,
     paddingHorizontal: 12,
-    borderRadius: 20,
-    alignSelf: "flex-start",
+    paddingVertical: 6,
+    borderRadius: 16,
   },
 
   statusText: {
     fontSize: 11,
     fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
   },
 
   problemBox: {
     backgroundColor: COLORS.sectionBg,
-    borderRadius: 14,
     padding: 14,
-    marginBottom: 14,
+    borderRadius: 12,
+    marginBottom: 12,
   },
 
   problemLabel: {
     fontSize: 11,
-    fontWeight: "600",
     color: COLORS.textMuted,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginBottom: 6,
+    marginBottom: 4,
   },
 
   problemText: {
     fontSize: 14,
     color: COLORS.textDark,
-    lineHeight: 20,
-  },
-
-  itemsContainer: {
-    marginBottom: 14,
-  },
-
-  itemsLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: COLORS.textMuted,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginBottom: 10,
   },
 
   itemRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "flex-start",
-    backgroundColor: COLORS.sectionBg,
-    borderRadius: 12,
-    padding: 12,
     marginBottom: 8,
   },
 
-  itemDetails: {
-    flex: 1,
-    paddingRight: 12,
-  },
+  itemDesc: { fontSize: 14, fontWeight: "600" },
+  itemQty: { fontSize: 12, color: COLORS.textMuted },
+  itemAmt: { fontWeight: "700" },
 
-  itemDescription: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: COLORS.textDark,
-    marginBottom: 4,
-  },
-
-  itemQuantity: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-  },
-
-  itemAmount: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: COLORS.textDark,
-  },
-
-  totalContainer: {
+  totalRow: {
     flexDirection: "row",
     justifyContent: "space-between",
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderColor: COLORS.cardBorder,
+  },
+
+  totalLabel: { fontWeight: "600" },
+  totalValue: { fontSize: 20, fontWeight: "700" },
+
+  invoiceBtn: {
+    marginTop: 12,
+    padding: 12,
     alignItems: "center",
     backgroundColor: COLORS.sectionBg,
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 12,
+    borderRadius: 12,
   },
 
-  totalLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: COLORS.textMuted,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
+  invoiceText: { color: COLORS.link, fontWeight: "600" },
 
-  totalValue: {
-    fontSize: 22,
-    fontWeight: "700",
-    color: COLORS.textDark,
-  },
-
-  invoiceButton: {
-    backgroundColor: COLORS.sectionBg,
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 4,
-    alignItems: "center",
-  },
-
-  invoiceText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: COLORS.link,
-  },
-
-  divider: {
-    height: 1,
-    backgroundColor: COLORS.cardBorder,
-    marginVertical: 16,
-  },
-
-  buttonContainer: {
+  actionRow: {
     flexDirection: "row",
     gap: 10,
+    marginTop: 16,
   },
 
-  acceptButton: {
+  acceptBtn: {
     flex: 1,
     backgroundColor: COLORS.success,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 16,
+    padding: 14,
+    borderRadius: 14,
     alignItems: "center",
-    shadowColor: COLORS.success,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
   },
 
-  acceptText: {
-    color: COLORS.white,
-    fontWeight: "700",
-    fontSize: 15,
-  },
-
-  rejectButton: {
+  rejectBtn: {
     flex: 1,
     backgroundColor: COLORS.danger,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 16,
+    padding: 14,
+    borderRadius: 14,
     alignItems: "center",
-    shadowColor: COLORS.danger,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
   },
 
-  rejectText: {
-    color: COLORS.white,
+  actionText: {
+    color: "#FFF",
     fontWeight: "700",
-    fontSize: 15,
   },
-
-  bottomPadding: {
-    height: 20,
+    updateBtn: {
+    backgroundColor: "#3ff7ba",
+    paddingVertical: 16,
+    borderRadius: 16,
+    marginTop: 24,
+  },
+  updateBtnText: {
+    textAlign: "center",
+    fontSize: 17,
+    color: "#111827",
   },
 });
