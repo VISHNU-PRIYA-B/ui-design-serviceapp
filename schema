@@ -75,8 +75,6 @@ class CompanyProfileType(DjangoObjectType):
             return info.context.build_absolute_uri(self.authorized_signature.url)
         return None
         
-
-
 # class RepairRequestType(DjangoObjectType):
 #     estimation = graphene.Field(lambda: EstimationType)
 #     items = graphene.List(EstimationItemType)
@@ -230,12 +228,32 @@ class Query(graphene.ObjectType):
         return Estimation.objects.filter(repair_request__customer=info.context.user)
 
         # single estimation based on id:
-    my_estimation = graphene.Field(EstimationType, estimation_id=graphene.ID(required=True))
+    # my_estimation = graphene.Field(EstimationType, estimation_id=graphene.ID(required=True))
+    # @login_required
+    # def resolve_my_estimation(self, info, estimation_id):
+    #     user = info.context.user
+    #     estimation_id = int(estimation_id)
+    #     return Estimation.objects.get(id=estimation_id,repair_request__customer=user)
+
+    my_estimation = graphene.Field(
+        EstimationType,
+        request_id=graphene.String(required=True)
+    )
+
     @login_required
-    def resolve_my_estimation(self, info, estimation_id):
+    def resolve_my_estimation(self, info, request_id):
         user = info.context.user
-        estimation_id = int(estimation_id)
-        return Estimation.objects.get(id=estimation_id,repair_request__customer=user)
+
+        estimation = Estimation.objects.filter(
+            repair_request__request_id=request_id,
+            repair_request__customer=user   # customer can see only own estimation
+        ).first()
+
+        if not estimation:
+            raise GraphQLError("Estimation not found for this repair request")
+
+        return estimation
+
     
     # Admin view estimatin
     admin_estimation = graphene.Field(
@@ -515,10 +533,43 @@ class AddEstimationItem(graphene.Mutation):
         estimation.calculate_totals()
         return AddEstimationItem(item=item)
         
+# class ApproveEstimation(graphene.Mutation):
+#     class Arguments:
+#         request_id = graphene.String(required=True)
+#         approved = graphene.Boolean(required=True)
+#     estimation = graphene.Field(EstimationType)
+#     success = graphene.Boolean()
+#     message = graphene.String()
+
+#     @classmethod
+#     @login_required
+#     def mutate(cls, root, info, request_id, approved):
+#         user = info.context.user
+#         if not user.admin:
+#             raise GraphQLError("Only admin can approve or reject estimation")
+#         repair_request = RepairRequest.objects.filter(customer=user,request_id=request_id).first()
+#         if not repair_request:
+#             return ApproveEstimation(success=False,message="Repair request not found for this user")
+#         estimation = Estimation.objects.filter(repair_request=repair_request).first()
+#         if not estimation:
+#             return ApproveEstimation(success=False, message="No estimation found for this repair request")
+#         estimation.approved = approved
+#         estimation.save()
+
+#         if approved:
+#             repair_request.status="ACCEPTED"
+#             repair_request.save()
+#         else:
+#             repair_request.status="REJECTED"
+#             repair_request.save()
+
+#         return ApproveEstimation(estimation=estimation, success=True, message=f"Estimation{'approved' if approved else 'disapproved'} successfully")
+
 class ApproveEstimation(graphene.Mutation):
     class Arguments:
         request_id = graphene.String(required=True)
         approved = graphene.Boolean(required=True)
+
     estimation = graphene.Field(EstimationType)
     success = graphene.Boolean()
     message = graphene.String()
@@ -527,25 +578,41 @@ class ApproveEstimation(graphene.Mutation):
     @login_required
     def mutate(cls, root, info, request_id, approved):
         user = info.context.user
+
         if not user.admin:
             raise GraphQLError("Only admin can approve or reject estimation")
-        repair_request = RepairRequest.objects.filter(customer=user,request_id=request_id).first()
+
+        repair_request = RepairRequest.objects.filter(
+            request_id=request_id
+        ).first()
+
         if not repair_request:
-            return ApproveEstimation(success=False,message="Repair request not found for this user")
-        estimation = Estimation.objects.filter(repair_request=repair_request).first()
+            raise GraphQLError("Repair request not found")
+
+        estimation = Estimation.objects.filter(
+            repair_request=repair_request
+        ).first()
+
         if not estimation:
-            return ApproveEstimation(success=False, message="No estimation found for this repair request")
+            raise GraphQLError("No estimation found for this repair request")
+
+        if repair_request.status in ["ACCEPTED", "REJECTED"]:
+            raise GraphQLError(
+                f"Estimation already {repair_request.status.lower()}"
+            )
+
         estimation.approved = approved
         estimation.save()
 
-        if approved:
-            repair_request.status="ACCEPTED"
-            repair_request.save()
-        else:
-            repair_request.status="REJECTED"
-            repair_request.save()
+        repair_request.status = "ACCEPTED" if approved else "REJECTED"
+        repair_request.save()
 
-        return ApproveEstimation(estimation=estimation, success=True, message=f"Estimation{'approved' if approved else 'disapproved'} successfully")
+        return ApproveEstimation(
+            estimation=estimation,
+            success=True,
+            message=f"Estimation {'approved' if approved else 'rejected'} successfully"
+        )
+
         
 class UpdateRepairStatus(graphene.Mutation):
     class Arguments:
@@ -602,8 +669,6 @@ class UpdateRepairStatus(graphene.Mutation):
 
         expected_next = ADMIN_FLOW.get(current)
 
-        if update_status != expected_next:
-            raise GraphQLError(f"Invalid update. Next status should be {expected_next}.")
 
         # SAVE ADMIN UPDATE
         repair_request.status = update_status
