@@ -4,6 +4,9 @@ from django.utils.crypto import get_random_string
 import django_filters
 from decimal import Decimal
 from django.conf import settings
+import uuid
+from django.utils import timezone
+from datetime import timedelta
 
 #Custom User Manager
 class UserManager(BaseUserManager):
@@ -50,6 +53,15 @@ class User(AbstractBaseUser, PermissionsMixin):
     def is_superuser(self):
         return self.admin
     
+class PasswordResetOTP(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    otp = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    verified = models.BooleanField(default=False)
+
+    def expired(self):
+        return timezone.now() > self.created_at + timedelta(minutes=5)
+
 class CompanyProfile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,related_name="company_profile",null=True,blank=True)
     owner_name = models.CharField(max_length=200)
@@ -103,11 +115,13 @@ class RepairRequest(models.Model):
         return f"{self.item_name} - ({self.request_id})"
     
 class Estimation(models.Model):
-    repair_request = models.OneToOneField(RepairRequest, on_delete=models.CASCADE, related_name="estimation")
+    repair_request = models.ForeignKey(RepairRequest, on_delete=models.CASCADE, related_name="estimations")
     subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     tax = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    approved = models.BooleanField(default=False)
+    approved = models.BooleanField(null=True, blank=True, default=None)
+    created_at = models.DateTimeField(auto_now_add=True)
+    invoice = models.ForeignKey("Invoice",on_delete=models.SET_NULL,null=True,blank=True,related_name="estimations")
 
     def __str__(self):
         return f"Estimation for Request {self.repair_request_id}"
