@@ -1,0 +1,328 @@
+// @ts-nocheck
+import React, {useContext,useState,useLayoutEffect,useEffect,} from "react";
+import {View,Text,TextInput,TouchableOpacity,Modal,StyleSheet,Alert,ScrollView,Animated,KeyboardAvoidingView,Platform,TouchableWithoutFeedback,Keyboard,} from "react-native";
+import { graphqlRequest, setAuthToken } from "../services/api";
+import { UserContext } from "../components/ui/UserContext";
+import { useNavigation } from "@react-navigation/native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { openWhatsApp } from "../utils/whatsapp";
+import { LinearGradient } from "expo-linear-gradient";
+
+export default function CreateRepairRequest() {
+  const { token: contextToken } = useContext(UserContext);
+
+  const [customerName, setCustomerName] = useState("");
+  const [itemName, setItemName] = useState("");
+  const [problemDescription, setProblemDescription] = useState("");
+  const [contactInfo, setContactInfo] = useState("");
+  const [popupVisible, setPopupVisible] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  
+  const [whatsAppData, setWhatsAppData] = useState({
+    phone: "",
+    message: "",
+  });
+
+  const navigation = useNavigation();
+  const scaleAnim = useState(new Animated.Value(0))[0];
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      title: "Repair Request",
+      headerStyle: { backgroundColor: "#8B5CF6" },
+      headerTintColor: "#fff",
+      headerLeft: () => (
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backButton}
+        >
+          <Text style={styles.backArrow}>←</Text>
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation]);
+
+  useEffect(() => {
+    if (popupVisible) {
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        friction: 5,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      scaleAnim.setValue(0);
+    }
+  }, [popupVisible]);
+
+  const handleCreate = async () => {
+    if (!customerName || !itemName || !problemDescription || !contactInfo) {
+      Alert.alert("Missing Information", "Please fill all fields");
+      return;
+    }
+
+    const tokenToUse = contextToken || (await AsyncStorage.getItem("token"));
+    if (!tokenToUse) {
+      Alert.alert("Error", "You are not logged in");
+      return;
+    }
+
+    setAuthToken(tokenToUse);
+
+    const query = `
+      mutation CreateRepairRequest(
+        $customerName: String!
+        $itemName: String!
+        $problemDescription: String!
+        $contactInfo: String!
+      ) {
+        createRepairRequest(
+          customerName: $customerName
+          itemName: $itemName
+          problemDescription: $problemDescription
+          contactInfo: $contactInfo
+        ) {
+          repairRequest {
+            requestId
+            status
+          }
+        }
+      }
+    `;
+
+    try {
+      setLoading(true);
+
+      const res = await graphqlRequest(query, {
+        customerName,
+        itemName,
+        problemDescription,
+        contactInfo,
+      });
+
+      if (res?.createRepairRequest?.repairRequest) {
+        
+        setWhatsAppData({
+          phone: contactInfo,
+          message: `Repair Request Created
+
+Customer: ${customerName}
+Item: ${itemName}
+Issue: ${problemDescription}
+
+Our team will contact you shortly.`,
+        });
+
+        setPopupVisible(true);
+
+        setCustomerName("");
+        setItemName("");
+        setProblemDescription("");
+        setContactInfo("");
+      } else {
+        Alert.alert("Error", "Failed to create repair request");
+      }
+    } catch (error) {
+      Alert.alert("Error", "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePopupClose = () => {
+    setPopupVisible(false);
+    navigation.navigate("Profile");
+  };
+
+  return (
+   
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={90}
+    >
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <View style={styles.container}>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <LinearGradient
+              colors={["#A78BFA", "#8B5CF6"]}
+              style={styles.headerBackground}
+            >
+              <Text style={styles.headerTitle}>Create Repair Request</Text>
+              <Text style={styles.headerSubtitle}>
+                Fill in the details below
+              </Text>
+            </LinearGradient>
+
+            <View style={styles.card}>
+              {/* Customer Name */}
+              <View style={styles.inputContainer}>
+                <Text style={styles.label}>Customer Name</Text>
+                <View style={styles.inputWrapper}>
+                  <Text style={styles.inputIcon}>👤</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={customerName}
+                    onChangeText={setCustomerName}
+                    placeholder="Enter your name"
+                    placeholderTextColor="#C4C4C4"
+                  />
+                </View>
+              </View>
+
+              {/* Item Name */}
+              <View style={styles.inputContainer}>
+                <Text style={styles.label}>Item Name</Text>
+                <View style={styles.inputWrapper}>
+                  <Text style={styles.inputIcon}>📦</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={itemName}
+                    onChangeText={setItemName}
+                    placeholder="Ex: Laptop / Phone"
+                    placeholderTextColor="#C4C4C4"
+                  />
+                </View>
+              </View>
+
+              {/* Problem Description */}
+              <View style={styles.inputContainer}>
+                <Text style={styles.label}>Problem Description</Text>
+                <TextInput
+                  style={[styles.input, styles.textarea]}
+                  value={problemDescription}
+                  onChangeText={setProblemDescription}
+                  multiline
+                  placeholder="Describe the problem..."
+                  placeholderTextColor="#C4C4C4"
+                />
+              </View>
+
+              {/* Contact Info */}
+              <View style={styles.inputContainer}>
+                <Text style={styles.label}>Contact Info</Text>
+                <View style={styles.inputWrapper}>
+                  <Text style={styles.inputIcon}>📱</Text>
+                  <TextInput
+                    style={styles.input}
+                    keyboardType="numeric"
+                    value={contactInfo}
+                    onChangeText={setContactInfo}
+                    placeholder="Phone Number"
+                    placeholderTextColor="#C4C4C4"
+                  />
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={styles.submitButton}
+                onPress={handleCreate}
+                disabled={loading}
+              >
+                <LinearGradient
+                  colors={["#A78BFA", "#8B5CF6"]}
+                  style={styles.gradientButton}
+                >
+                  <Text style={styles.buttonText}>
+                    {loading ? "Submitting..." : "Submit Request"}
+                  </Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+
+          {/* SUCCESS MODAL */}
+          <Modal transparent visible={popupVisible}>
+            <View style={styles.popupContainer}>
+              <Animated.View
+                style={[
+                  styles.popupBox,
+                  { transform: [{ scale: scaleAnim }] },
+                ]}
+              >
+                <Text style={styles.popupTitle}>Request Submitted!</Text>
+                <Text style={styles.popupMessage}>
+                  Do you want to send details to customer via WhatsApp?
+                </Text>
+
+                <TouchableOpacity
+                  onPress={() => {
+                    openWhatsApp(
+                      whatsAppData.phone,
+                      whatsAppData.message
+                    );
+                    handlePopupClose();
+                  }}
+                >
+                  <Text style={{ color: "#8B5CF6", marginTop: 20 }}>
+                    Send via WhatsApp
+                  </Text>
+                </TouchableOpacity>
+              </Animated.View>
+            </View>
+          </Modal>
+        </View>
+      </TouchableWithoutFeedback>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#F3F4F6" },
+
+  backButton: { marginLeft: 10 },
+  backArrow: { fontSize: 22, color: "#fff" },
+
+  headerBackground: { padding: 24, paddingBottom: 60 },
+  headerTitle: { color: "#fff", fontSize: 26, fontWeight: "700" },
+  headerSubtitle: { color: "#fff", opacity: 0.9, marginTop: 4 },
+
+  card: {
+    backgroundColor: "#fff",
+    marginHorizontal: 16,
+    marginTop: -30,
+    borderRadius: 24,
+    padding: 24,
+    elevation: 5,
+  },
+
+  inputContainer: { marginBottom: 20 },
+  label: { fontWeight: "700", marginBottom: 8, fontSize: 15 },
+
+  inputWrapper: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E5E5E5",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    backgroundColor: "#FAFAFA",
+  },
+
+  inputIcon: { fontSize: 20, marginRight: 8 },
+
+  input: { flex: 1, padding: 14, fontSize: 15 },
+
+  textarea: {
+    height: 120,
+    textAlignVertical: "top",
+    borderWidth: 1,
+    borderColor: "#E5E5E5",
+    borderRadius: 12,
+    padding: 14,
+    backgroundColor: "#FAFAFA",
+  },
+
+  submitButton: { marginTop: 10 },
+  gradientButton: { padding: 16, borderRadius: 12, alignItems: "center" },
+  buttonText: { color: "#fff", fontWeight: "700", fontSize: 16 },
+
+  popupContainer: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  popupBox: { backgroundColor: "#fff", padding: 30, borderRadius: 20 },
+  popupTitle: { fontSize: 20, fontWeight: "700" },
+});
