@@ -107,6 +107,8 @@ export default function Profile() {
   const pickProfilePic = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing:true,
+      aspect:[1,1],
       quality: 0.7,
       base64: true,
     });
@@ -219,7 +221,7 @@ const saveCompany = async () => {
       <ScrollView contentContainerStyle={{ paddingBottom: 140 }}>
         <LinearGradient colors={["#8B5CF6", "#A78BFA"]} style={styles.header}>
           <Text style={styles.headerTitle}>My Profile</Text>
-          <Text style={styles.headerSubtitle}>Manage your account</Text>
+          
         </LinearGradient>
 
         <View style={styles.card}>
