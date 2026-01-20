@@ -1,16 +1,6 @@
 // @ts-nocheck
 import React, { useEffect, useState, useLayoutEffect, useContext, useCallback } from "react";
-import {
-  View,
-  Text,
-  Image,
-  StyleSheet,
-  ActivityIndicator,
-  TouchableOpacity,
-  ScrollView,
-  TextInput,
-  Alert,
-} from "react-native";
+import {View,Text,Image,StyleSheet,ActivityIndicator,TouchableOpacity,ScrollView,TextInput,Alert,} from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { Menu } from "react-native-paper";
 import { graphqlRequest } from "../services/api";
@@ -18,8 +8,6 @@ import { useLogout } from "../hooks/Logout";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import { UserContext } from "../components/ui/UserContext";
 import { LinearGradient } from "expo-linear-gradient";
-
-
 
 const QUERY = `
 query {
@@ -107,8 +95,8 @@ export default function Profile() {
       setCompanyName(res.companyProfile?.companyName || res.currentUser?.companyName ||"");
       setPhone(res.companyProfile?.phone || "");
       setAddress(res.companyProfile?.address || "");
-      setSeal(res.companyProfile?.seal ? { uri: res.companyProfile.seal} : null);
-      setAuthorizedSignature(res.companyProfile?.authorizedSignature ? { uri: res.companyProfile.authorizedSignature}: null);
+      setSeal(res.companyProfile?.seal ? { uri: res.companyProfile.seal, isRemote:true} : null);
+      setAuthorizedSignature(res.companyProfile?.authorizedSignature ? { uri: res.companyProfile.authorizedSignature, isRemote:true}: null);
     } catch (e) {
       console.log(e);
     } finally {
@@ -156,29 +144,45 @@ export default function Profile() {
       });
     }
   };
+  console.log("SIGNATURE",authorizedSignature);
+  console.log("SEAL",seal);
+  console.log("PROFILE PIC",profilePic);
 
-  const saveCompany = async () => {
-    if(!/^[0-9]{10}$/.test(phone)){
-      Alert.alert("Invalid phone number","Please enter a valid 10-digit number");
-      return;
-    }
-    try {
-      const res = await graphqlRequest(
-        SAVE_COMPANY,
-        { ownerName, companyName, phone, address, seal, authorizedSignature },
-        token,
-        true
-      );
+const saveCompany = async () => {
+  if(!/^[0-9]{10}$/.test(phone)){
+    Alert.alert("Invalid phone number","Please enter a valid 10-digit number");
+    return;
+  }
 
-      if (res.createOrUpdateCompanyProfile.success) {
-        Alert.alert("Success", "Profile updated");
-        setEditMode(false);
-        loadProfile();
-      }
-    } catch {
-      Alert.alert("Error", "Save failed");
+  const variables = { ownerName, companyName, phone, address };
+
+  if(seal && !seal.isRemote){
+    variables.seal = seal;
+  }
+
+  if(authorizedSignature && !authorizedSignature.isRemote){
+    variables.authorizedSignature = authorizedSignature;
+  }
+
+  try {
+    const res = await graphqlRequest(
+      SAVE_COMPANY,
+      variables,
+      token,
+      true
+    );
+
+    if (res.createOrUpdateCompanyProfile.success) {
+      Alert.alert("Success", "Profile updated");
+      setEditMode(false);
+      loadProfile();
     }
-  };
+  } catch(e) {
+    console.log(e);
+    Alert.alert("Error", "Save failed");
+  }
+};
+
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -210,7 +214,7 @@ export default function Profile() {
     );
   }
 
-  return (
+  return (  
     <View style={{ flex: 1, backgroundColor: "#F3F4F6" }}>
       <ScrollView contentContainerStyle={{ paddingBottom: 140 }}>
         <LinearGradient colors={["#8B5CF6", "#A78BFA"]} style={styles.header}>
@@ -324,11 +328,11 @@ export default function Profile() {
           </View>
           <Text style={styles.bottomLabel}>View</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.bottomButton} onPress={() => navigation.navigate("ApproveEstimation")}>
+        <TouchableOpacity style={styles.bottomButton} onPress={() => navigation.navigate("AdminEstimation")}>
           <View style={styles.bottomCircle}>
             <Text style={styles.bottomIcon}>✅</Text>
           </View>
-          <Text style={styles.bottomLabel}>Approve</Text>
+          <Text style={styles.bottomLabel}>Estimation</Text>
         </TouchableOpacity>
       </View>
     </View>
