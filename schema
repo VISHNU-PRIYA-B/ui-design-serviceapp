@@ -48,7 +48,7 @@ class UserType(DjangoObjectType):
     def resolve_profilePic(self,info):
         try:
             if self.profile_pic:
-                return info.context.build_absolute_uri(self.profile_pic.url)
+                return info.context.build_absolute_uri(self.profile_pic.url).replace("http://","https://")
         except:
             return None
         return None
@@ -58,6 +58,7 @@ class UserType(DjangoObjectType):
 class CompanyProfileType(DjangoObjectType):
     seal = graphene.String()
     authorizedSignature = graphene.String()
+  
     class Meta:
         model = CompanyProfile
         fields =("id","owner_name","company_name","address","phone","profile_pic","seal","authorized_signature")
@@ -65,14 +66,16 @@ class CompanyProfileType(DjangoObjectType):
     def resolve_seal(self, info):
         if self.seal:
 
-            return info.context.build_absolute_uri(self.seal.url)
+            return info.context.build_absolute_uri(self.seal.url).replace("http://","https://")
         return None 
 
 
-    def resolve_authorized_signature(self, info):
+    def resolve_authorizedSignature(self, info):
         if self.authorized_signature:
-            return info.context.build_absolute_uri(self.authorized_signature.url)
+            return info.context.build_absolute_uri(self.authorized_signature.url).replace("http://","https://")
         return None
+    
+
         
 # class RepairRequestType(DjangoObjectType):
 #     estimation = graphene.Field(lambda: EstimationType)
@@ -547,90 +550,11 @@ class AddEstimationItem(graphene.Mutation):
 
         estimation.calculate_totals()
 
+        repair_request.status ="WAITING_FOR_APPROVAL"
+        repair_request.save()
+
         return AddEstimationItem(item=item)
 
-
-# class ApproveEstimation(graphene.Mutation):
-#     class Arguments:
-#         request_id = graphene.String(required=True)
-#         approved = graphene.Boolean(required=True)
-#     estimation = graphene.Field(EstimationType)
-#     success = graphene.Boolean()
-#     message = graphene.String()
-
-#     @classmethod
-#     @login_required
-#     def mutate(cls, root, info, request_id, approved):
-#         user = info.context.user
-#         if not user.admin:
-#             raise GraphQLError("Only admin can approve or reject estimation")
-#         repair_request = RepairRequest.objects.filter(customer=user,request_id=request_id).first()
-#         if not repair_request:
-#             return ApproveEstimation(success=False,message="Repair request not found for this user")
-#         estimation = Estimation.objects.filter(repair_request=repair_request).first()
-#         if not estimation:
-#             return ApproveEstimation(success=False, message="No estimation found for this repair request")
-#         estimation.approved = approved
-#         estimation.save()
-
-#         if approved:
-#             repair_request.status="ACCEPTED"
-#             repair_request.save()
-#         else:
-#             repair_request.status="REJECTED"
-#             repair_request.save()
-
-#         return ApproveEstimation(estimation=estimation, success=True, message=f"Estimation{'approved' if approved else 'disapproved'} successfully")
-
-# class ApproveEstimation(graphene.Mutation):
-    # class Arguments:
-    #     request_id = graphene.String(required=True)
-    #     approved = graphene.Boolean(required=True)
-
-    # estimation = graphene.Field(EstimationType)
-    # success = graphene.Boolean()
-    # message = graphene.String()
-
-    # @classmethod
-    # @login_required
-    # def mutate(cls, root, info, request_id, approved):
-    #     user = info.context.user
-
-    #     if not user.admin:
-    #         raise GraphQLError("Only admin can approve or reject estimation")
-
-    #     repair_request = RepairRequest.objects.filter(
-    #         request_id=request_id
-    #     ).first()
-
-    #     if not repair_request:
-    #         raise GraphQLError("Repair request not found")
-
-
-    #     estimation = Estimation.objects.filter(
-    #         repair_request=repair_request
-    #     ).order_by("-created_at").first()
-
-    #     if not estimation:
-    #         raise GraphQLError("No estimation found for this repair request")
-
-    #     if estimation.approved is not None:
-    #         raise GraphQLError("This estimation is already processed")
-
-    #     estimation.approved = approved
-    #     estimation.save()
-
-    #     if approved:
-    #         repair_request.status = "ACCEPTED"
-    #     else:
-    #         repair_request.status = "REJECTED"
-    #     repair_request.save()
-
-    #     return ApproveEstimation(
-    #         estimation=estimation,
-    #         success=True,
-    #         message=f"Estimation {'approved' if approved else 'rejected'} successfully"
-    #     )
 class ApproveEstimation(graphene.Mutation):
     class Arguments:
         estimation_id = graphene.ID(required=True)
@@ -641,47 +565,39 @@ class ApproveEstimation(graphene.Mutation):
     message = graphene.String()
 
     @classmethod
-    @login_required
+
     def mutate(cls, root, info, estimation_id, approved):
-        user = info.context.user
-
-        if not user.admin:
-            raise GraphQLError("Only admin can approve or reject estimation")
-
-        estimation = Estimation.objects.filter(id=estimation_id).first()
-
-        if not estimation:
-            raise GraphQLError("Estimation not found")
-
-        if estimation.approved is not None:
-            raise GraphQLError("This estimation is already processed")
-
+        estimation = Estimation.objects.get(id=estimation_id)
         repair_request = estimation.repair_request
 
-        # 🔹 If rejected → delete estimation
-        if not approved:
-            estimation.delete()
-        else:
+        if approved:
             estimation.approved = True
             estimation.save()
 
-        # 🔹 Recalculate request status
-        if Estimation.objects.filter(repair_request=repair_request, approved=False).exists():
-            repair_request.status = "REJECTED"
-        elif Estimation.objects.filter(repair_request=repair_request, approved__isnull=True).exists():
-            repair_request.status = "PENDING"
-        else:
             repair_request.status = "ACCEPTED"
+            repair_request.save()
 
-        repair_request.save()
+        else:
+        # If rejected
+            if Estimation.objects.filter(
+                repair_request=repair_request,
+                approved=True
+            ).exists():
+            # There is already an accepted estimation → delete this rejected one
+                estimation.delete()
 
-        return ApproveEstimation(
-            estimation=estimation if approved else None,
-            success=True,
-            message=f"Estimation {'approved' if approved else 'rejected and removed'} successfully"
-        )
+                repair_request.status = "ACCEPTED"
+                repair_request.save()
+            else:
+            # No accepted estimation exists → full rejection
+                estimation.approved = False
+                estimation.delete()
 
-      
+                repair_request.status = "REJECTED"
+                repair_request.save()
+
+        return ApproveEstimation(success=True)
+
 class UpdateRepairStatus(graphene.Mutation):
     class Arguments:
         request_id = graphene.String(required=True)
@@ -769,6 +685,9 @@ class GenerateInvoice(graphene.Mutation):
 
         if not user.admin:
             raise GraphQLError("Only admin can generate invoice")
+        profile = CompanyProfile.objects.filter(user=user).first()
+        if not profile:
+            raise GraphQLError("Fill the profile before generating invoice")
 
         try:
             repair_request = RepairRequest.objects.get(request_id=request_id)
@@ -777,10 +696,15 @@ class GenerateInvoice(graphene.Mutation):
 
         if repair_request.status != "READY_TO_DELIVER":
             raise GraphQLError("Invoice can only be generated at delivery state")
+        # Check estimation exists
+        estimation = Estimation.objects.filter(repair_request=repair_request).first()
+        if not estimation:
+            raise GraphQLError("Estimation not found for this repair request")
 
-        if hasattr(repair_request, "invoice"):
+        # Check invoice correctly
+        if Invoice.objects.filter(repair_request=repair_request).exists():
             raise GraphQLError("Invoice already generated")
-
+        
         # generate invoice number
         max_id = Invoice.objects.aggregate(max_id=Max("id"))["max_id"]
         next_number = (max_id + 1) if max_id else 1
@@ -794,15 +718,16 @@ class GenerateInvoice(graphene.Mutation):
             notes=notes,
         )
 
-        Estimation.objects.filter(repair_request=repair_request).update(invoice=invoice)
+        #  attach invoice to estimation
+        estimation.invoice = invoice
+        estimation.save()
 
         pdf_url = create_invoice_pdf(invoice)
         invoice.pdf_url = pdf_url
         invoice.save()
 
         return GenerateInvoice(invoice=invoice)
-
-    
+   
 class CreateOrUpdateCompanyProfile(graphene.Mutation):
     class Arguments:
         owner_name = graphene.String(required=True)
@@ -881,10 +806,3 @@ class Mutation(graphene.ObjectType):
     token_auth = graphql_jwt.ObtainJSONWebToken.Field()
     verify_token = graphql_jwt.Verify.Field()
     refresh_token = graphql_jwt.Refresh.Field()
-
-
-
-
-
-
-
