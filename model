@@ -86,6 +86,7 @@ class CompanyProfile(models.Model):
 class RepairRequest(models.Model):
     STATUS_CHOICES = [
         ('PENDING','PENDING'),
+        ('WAITING_FOR_APPROVAL','WAITING_FOR_APPROVAL'),
         ('ACCEPTED','ACCEPTED'),
         ('REJECTED',"REJECTED"),
         # Admin side
@@ -172,12 +173,13 @@ class Updaterepairstatus(models.Model):
    class Meta:
        ordering = ["updated_on","id"]
 
+
 class Invoice(models.Model):
     invoice_number = models.CharField(max_length=50,unique=True,null=True,blank=True)
     repair_request = models.OneToOneField(RepairRequest, on_delete=models.CASCADE, related_name="invoice")
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
     parts_replaced = models.TextField(blank=True,null=True)
-    notes = models.TextField(blank=True,null=True)
+    notes = models.TextField(blank=True,null=True)  
     generated_on = models.DateTimeField(auto_now_add=True)
    
 
