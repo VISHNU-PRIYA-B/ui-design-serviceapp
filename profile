@@ -83,6 +83,11 @@ export default function Profile() {
 
   useFocusEffect(useCallback(() => () => setMenuVisible(false), []));
 
+  const toggleMenu = useCallback(() => {
+  setMenuVisible(prev => !prev);
+}, []);
+
+
   useEffect(() => {
     loadProfile();
   }, []);
@@ -188,7 +193,7 @@ const saveCompany = async () => {
 
   useLayoutEffect(() => {
     navigation.setOptions({
-      title: "Profile",
+     
       headerStyle: { backgroundColor: "#8B5CF6" },
       headerTintColor: "#fff",
       headerRight: () => (
@@ -196,8 +201,8 @@ const saveCompany = async () => {
           visible={menuVisible}
           onDismiss={() => setMenuVisible(false)}
           anchor={
-            <TouchableOpacity onPress={() => setMenuVisible(true)} style={{ marginRight: 16 }}>
-              <Text style={{ fontSize: 22, color: "#fff" }}>☰</Text>
+            <TouchableOpacity onPress={toggleMenu} style={{ marginRight: 16 }}>
+              <Text style={{ fontSize: 22, color: "#fff" }}> ☰</Text>
             </TouchableOpacity>
           }
         >
@@ -472,7 +477,7 @@ const styles = StyleSheet.create({
 
   bottomBar: {
     position: "absolute",
-    bottom: 0,
+    bottom: 20,
     left: 0,
     right: 0,
     height: 90,
