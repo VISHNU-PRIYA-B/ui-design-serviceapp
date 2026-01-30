@@ -87,7 +87,6 @@ export default function Profile() {
   setMenuVisible(prev => !prev);
 }, []);
 
-
   useEffect(() => {
     loadProfile();
   }, []);
@@ -133,7 +132,7 @@ export default function Profile() {
         setProfilePic(res.updateProfile.user.profilePic);
       }
     } catch {
-      Alert.alert("Error", "Profile image upload failed");
+      Alert.alert("Profile image upload failed");
     }
   };
 
@@ -186,10 +185,9 @@ const saveCompany = async () => {
     }
   } catch(e) {
     console.log(e);
-    Alert.alert("Error", "Save failed");
+    Alert.alert("Save failed");
   }
 };
-
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -345,7 +343,6 @@ const saveCompany = async () => {
     </View>
   );
 }
-
 
 const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
