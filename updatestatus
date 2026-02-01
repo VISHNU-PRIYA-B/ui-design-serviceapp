@@ -1,0 +1,542 @@
+// @ts-nocheck
+import React, { useContext, useState, useCallback,useLayoutEffect } from "react";
+import {View,Text,TouchableOpacity,Modal,StyleSheet,ScrollView,ActivityIndicator,TextInput,Alert,KeyboardAvoidingView,Platform,TouchableWithoutFeedback,Keyboard} from "react-native";
+import { graphqlRequest } from "../services/api";
+import {useNavigation,useRoute,useFocusEffect,} from "@react-navigation/native";
+import { UserContext } from "../components/ui/UserContext";
+import { openWhatsApp } from "../utils/whatsapp";
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
+
+const STATUS_FLOW = [
+  "PENDING",
+  "STARTED",
+  "REPAIRING",
+  "TESTING",
+  "READY_TO_DELIVER",
+];
+
+export default function UpdateStatus() {
+  const route = useRoute();
+  const { requestId } = route.params || {};
+  const navigation = useNavigation();
+
+  const { user, token, loading: authLoading } = useContext(UserContext);
+  const isAdmin = user?.admin === true;
+
+  const [dataLoading, setDataLoading] = useState(true);
+  const [repairData, setRepairData] = useState(null);
+
+  const [showStatusModal, setShowStatusModal] = useState(false);
+  const [showDescModal, setShowDescModal] = useState(false);
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+
+  const [selectedStatus, setSelectedStatus] = useState("");
+  const [desc, setDesc] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  if (authLoading) {
+    return (
+      <LinearGradient colors={['#8B5CF6', '#7C3AED']} style={styles.gradientContainer}>
+        <ActivityIndicator size="large" color="#fff" style={{ marginTop: 40 }} />
+      </LinearGradient>
+    );
+  }
+    useLayoutEffect(() => {
+      navigation.setOptions({
+        headerShown: false,
+      });
+    }, [navigation]);
+
+  const loadLatest = async () => {
+    try {
+      setDataLoading(true);
+      
+      const QUERY = `
+        query GetRepair($id:String!) {
+          repairRequest(requestId:$id) {
+            requestId
+            status
+            itemName
+            contactInfo
+            updates {
+              updateStatus
+              description
+              updatedOn
+            }
+          }
+        }
+      `;
+
+      const res = await graphqlRequest(QUERY, { id: requestId }, token);
+      setRepairData(res?.repairRequest || null);
+    } catch (err) {
+      console.log("Load error:", err);
+      Alert.alert("Error", "Failed to load repair details");
+    } finally {
+      setDataLoading(false);
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      if (requestId) loadLatest();
+    }, [requestId])
+  );
+
+  const updates = [...(repairData?.updates || [])].sort(
+    (a, b) =>
+      new Date(a.updatedOn).getTime() -
+      new Date(b.updatedOn).getTime()
+  );
+
+  const isReadyToDeliver =
+    repairData?.status === "READY_TO_DELIVER" ||
+    updates.some((u) => u.updateStatus === "READY_TO_DELIVER");
+
+  const onSelectStatus = (status) => {
+    setSelectedStatus(status);
+    setShowStatusModal(false);
+    setShowDescModal(true);
+  };
+
+    const MUTATION = `
+      mutation UpdateRepairStatus(
+        $request_id:String!,
+        $update_status:String!,
+        $description:String!
+      ){
+        updateRepairStatus(
+          requestId:$request_id,
+          updateStatus:$update_status,
+          description:$description
+        ){
+          success
+          message
+          status
+        }
+      }
+    `;
+        const submitUpdate = async () =>{
+        setLoading(true);
+
+
+    try {
+      await graphqlRequest(
+        MUTATION,
+        {
+          request_id: requestId,
+          update_status: selectedStatus,
+          description: desc || "",
+        },
+        token
+      );
+
+      setShowDescModal(false);
+      setShowWhatsAppModal(true);
+
+    } catch (err) {
+      console.log("Update failed:", err);
+
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : "Invalid status update";
+
+      setShowDescModal(false);
+
+      setTimeout(() => {
+        Alert.alert(
+          "Invalid Status Update",
+          errorMessage,
+          [{ text: "OK" }]
+        );
+      }, 300);
+
+    } finally {
+      setLoading(false);
+    }
+  };
+  const displayStatusFlow = STATUS_FLOW.filter(
+  (status) => status !== "PENDING"
+);
+
+  return (
+    
+    <LinearGradient colors={['#8B5CF6', '#7C3AED']} style={styles.gradientContainer}>
+      {/* WHATSAPP CONFIRM MODAL */}
+      <Modal transparent visible={showWhatsAppModal} animationType="fade">
+        <View style={styles.modalBackground}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Status Updated</Text>
+
+            <Text style={{ marginBottom: 15, color: '#374151' }}>
+              Do you want to send this update to the customer via WhatsApp?
+            </Text>
+
+            <TouchableOpacity
+              style={styles.submitBtn}
+              onPress={() => {
+                setShowWhatsAppModal(false);
+
+                openWhatsApp(
+                  repairData?.contactInfo,
+                  `Repair Update: ${repairData?.itemName}
+
+Status: ${selectedStatus.replace(/_/g, " ")}
+
+Details:
+${desc}
+
+Thank you.`
+                );
+
+                setDesc("");
+                setSelectedStatus("");
+                loadLatest();
+              }}
+            >
+              <Text style={styles.submitText}>Send WhatsApp</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => {
+                setShowWhatsAppModal(false);
+                setDesc("");
+                setSelectedStatus("");
+                loadLatest();
+              }}
+              style={styles.cancelButton}
+            >
+              <Text style={styles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MAIN SCREEN */}
+      <ScrollView style={styles.scrollView}>
+        {/* Header Section */}
+        <View style={styles.header}>
+          <TouchableOpacity 
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Update Status</Text>
+        </View>
+
+        {/* Content Card */}
+        <View style={styles.contentContainer}>
+          <View style={styles.card}>
+            <Text style={styles.heading}>Repair Status</Text>
+
+            {dataLoading ? (
+              <ActivityIndicator size="large" style={{ marginTop: 40 }} color="#8B5CF6" />
+            ) : (
+              <>
+                <View style={styles.timelineContainer}>
+                  {displayStatusFlow.map((step, index) => {
+                    const update = updates.find(
+                      (u) => u.updateStatus === step
+                    );
+
+                    return (
+                      <View key={step} style={styles.timelineItem}>
+                        <TouchableOpacity
+                        onPress={() => onSelectStatus(step)}
+                        style={[
+                          styles.circle, update && styles.circleCompleted,
+                        ]}
+                        />
+
+                        {index < STATUS_FLOW.length - 1 && (
+                          <View
+                            style={[
+                              styles.line,
+                              update && styles.lineCompleted,
+                            ]}
+                          />
+                        )}
+                        <View style={styles.timelineText}>
+                          <Text style={styles.stepLabel}>
+                            {step.replace(/_/g, " ")}
+                          </Text>
+                          <Text style={styles.stepDescription}>
+                            {update ? update.description : "Awaiting update..."}
+                          </Text>
+                          <Text style={styles.stepDate}>
+                            {update ? update.updatedOn : ""}
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+
+                {isAdmin && (
+                  <>
+
+
+                    {isReadyToDeliver && (
+                      <TouchableOpacity
+                        style={styles.invoiceBtn}
+                        onPress={() =>
+                          navigation.navigate("Invoice", {
+                            requestId: repairData.requestId,
+                          })
+                        }
+                      >
+                        <Text style={styles.updateBtnText}>Invoice</Text>
+                      </TouchableOpacity>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          </View>
+        </View>
+      </ScrollView>
+
+      {/* STATUS SELECT MODAL */}
+      <Modal visible={showStatusModal} transparent animationType="slide">
+        <View style={styles.modalBackground}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Select New Status</Text>
+
+            {displayStatusFlow.map((s) => (
+              <TouchableOpacity
+                key={s}
+                style={styles.modalOption}
+                onPress={() => onSelectStatus(s)}
+              >
+                <Text style={styles.modalOptionText}>{s.replace(/_/g, " ")}</Text>
+              </TouchableOpacity>
+            ))}
+
+            <TouchableOpacity
+              onPress={() => setShowStatusModal(false)}
+              style={styles.cancelButton}
+            >
+              <Text style={styles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* DESCRIPTION MODAL */}
+      <Modal visible={showDescModal} transparent animationType="slide">
+        <View style={styles.modalBackground}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>
+              Enter Description for{" "}
+              {selectedStatus.replace(/_/g, " ")}
+            </Text>
+
+            <TextInput
+              style={styles.input}
+              value={desc}
+              onChangeText={setDesc}
+              placeholder="Enter description"
+              placeholderTextColor="#9CA3AF"
+              multiline
+            />
+
+            {loading ? (
+              <ActivityIndicator color="#8B5CF6" />
+            ) : (
+              <TouchableOpacity
+                style={styles.submitBtn}
+                onPress={submitUpdate}
+              >
+                <Text style={styles.submitText}>Submit Update</Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity
+              onPress={() => setShowDescModal(false)}
+              style={styles.cancelButton}
+            >
+              <Text style={styles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </LinearGradient>
+  );
+}
+
+const styles = StyleSheet.create({
+  gradientContainer: {
+    flex: 1,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  header: {
+    paddingHorizontal: 24,
+    paddingTop: 48,
+    paddingBottom: 32,
+  },
+  backButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  headerTitle: {
+    fontSize: 28,
+    color: '#fff',
+  },
+  contentContainer: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+  },
+  card: {
+    backgroundColor: "#fff",
+    padding: 24,
+    borderRadius: 24,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+    minHeight: 500,
+  },
+  heading: { 
+    fontSize: 24,
+    marginBottom: 24,
+  },
+  timelineContainer: { 
+    paddingLeft: 10,
+    marginBottom: 20,
+  },
+  timelineItem: { 
+    minHeight: 100, 
+    position: "relative",
+    marginBottom: 8,
+  },
+  circle: {
+    position: "absolute",
+    left: 0,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#fff",
+    borderWidth: 3,
+    borderColor: "#3B82F6",
+    top: 0,
+  },
+  circleCompleted: { 
+    backgroundColor: "#3B82F6",
+  },
+  line: {
+    position: "absolute",
+    left: 10.5,
+    top: 24,
+    width: 3,
+    height: "100%",
+    backgroundColor: "#E5E7EB",
+  },
+  lineCompleted: { 
+    backgroundColor: "#3B82F6",
+  },
+  timelineText: { 
+    marginLeft: 40,
+  },
+  stepLabel: { 
+    fontSize: 18,
+    color: '#111827',
+    marginBottom: 4,
+  },
+  stepDescription: { 
+    color: "#6B7280",
+    marginTop: 3,
+    fontSize: 14,
+  },
+  stepDate: { 
+    color: "#9CA3AF",
+    marginTop: 4,
+    fontSize: 13,
+  },
+  updateBtn: {
+    backgroundColor: "#3DD9E8",
+    paddingVertical: 16,
+    borderRadius: 16,
+    marginTop: 12,
+  },
+  invoiceBtn: {
+    backgroundColor: "#10B981",
+    paddingVertical: 16,
+    borderRadius: 16,
+    marginTop: 12,
+  },
+  updateBtnText: { 
+    textAlign: "center",
+    fontSize: 17,
+    color: '#111827',
+  },
+  modalBackground: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.5)",
+  },
+  modalBox: {
+    backgroundColor: "#fff",
+    padding: 24,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+  },
+  modalTitle: { 
+    fontSize: 20,
+    marginBottom: 20,
+    color: '#111827',
+  },
+  modalOption: {
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  modalOptionText: {
+    fontSize: 16,
+    color: '#374151',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 20,
+    fontSize: 16,
+    minHeight: 100,
+    textAlignVertical: 'top',
+    color: '#111827',
+  },
+  submitBtn: {
+    backgroundColor: "#8B5CF6",
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 10,
+  },
+  submitText: { 
+    textAlign: "center",
+    color: "#fff",
+    fontSize: 17,
+  },
+  cancelButton: {
+    marginTop: 8,
+    backgroundColor: "#EF4444",
+    padding: 16,
+    borderRadius: 12,
+  },
+  cancelText: { 
+    color: "#fff",
+    textAlign: "center",
+    fontSize: 17,
+  },
+});
