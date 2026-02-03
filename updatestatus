@@ -326,14 +326,28 @@ Thank you.`
       </Modal>
 
       {/* DESCRIPTION MODAL */}
-      <Modal visible={showDescModal} transparent animationType="slide">
-        <View style={styles.modalBackground}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>
-              Enter Description for{" "}
-              {selectedStatus.replace(/_/g, " ")}
-            </Text>
+<Modal
+  visible={showDescModal}
+  transparent
+  animationType="slide"
+  statusBarTranslucent
+>
+  <KeyboardAvoidingView
+    behavior="height"   // Android
+    style={{ flex: 1 }}
+  >
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+      <View style={styles.modalBackground}>
+        <View style={styles.modalBox}>
+          <Text style={styles.modalTitle}>
+            Enter Description for{" "}
+            {selectedStatus.replace(/_/g, " ")}
+          </Text>
 
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
             <TextInput
               style={styles.input}
               value={desc}
@@ -342,27 +356,31 @@ Thank you.`
               placeholderTextColor="#9CA3AF"
               multiline
             />
+          </ScrollView>
 
-            {loading ? (
-              <ActivityIndicator color="#8B5CF6" />
-            ) : (
-              <TouchableOpacity
-                style={styles.submitBtn}
-                onPress={submitUpdate}
-              >
-                <Text style={styles.submitText}>Submit Update</Text>
-              </TouchableOpacity>
-            )}
-
+          {loading ? (
+            <ActivityIndicator color="#8B5CF6" />
+          ) : (
             <TouchableOpacity
-              onPress={() => setShowDescModal(false)}
-              style={styles.cancelButton}
+              style={styles.submitBtn}
+              onPress={submitUpdate}
             >
-              <Text style={styles.cancelText}>Cancel</Text>
+              <Text style={styles.submitText}>Submit Update</Text>
             </TouchableOpacity>
-          </View>
+          )}
+
+          <TouchableOpacity
+            onPress={() => setShowDescModal(false)}
+            style={styles.cancelButton}
+          >
+            <Text style={styles.cancelText}>Cancel</Text>
+          </TouchableOpacity>
         </View>
-      </Modal>
+      </View>
+    </TouchableWithoutFeedback>
+  </KeyboardAvoidingView>
+</Modal>
+
     </LinearGradient>
   );
 }
