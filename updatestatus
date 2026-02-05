@@ -9,7 +9,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 
 const STATUS_FLOW = [
-  "PENDING",
   "STARTED",
   "REPAIRING",
   "TESTING",
@@ -89,6 +88,12 @@ export default function UpdateStatus() {
       new Date(a.updatedOn).getTime() -
       new Date(b.updatedOn).getTime()
   );
+
+  const currentStatus =
+  updates.length > 0
+    ? updates[updates.length - 1].updateStatus
+    : "ACCEPTED"; // after estimation accepted
+
 
   const isReadyToDeliver =
     repairData?.status === "READY_TO_DELIVER" ||
