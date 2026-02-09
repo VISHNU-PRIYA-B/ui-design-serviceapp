@@ -1,0 +1,206 @@
+from django.db import models
+from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
+from django.utils.crypto import get_random_string
+import django_filters
+from decimal import Decimal
+from django.conf import settings
+import uuid
+from django.utils import timezone
+from datetime import timedelta
+from decimal import Decimal, InvalidOperation
+
+#Custom User Manager
+class UserManager(BaseUserManager):
+    def create_user(self, email, password=None, is_customer=False, is_admin=False, is_active=True):
+        if not email:
+            raise ValueError("Users must have an email address")
+        user = self.model(email=self.normalize_email(email))
+        user.set_password(password)
+        user.customer = is_customer
+        user.admin = is_admin
+        user.active = is_active
+        user.save(using=self._db)
+        return user
+
+    def create_adminuser(self, email, password=None):
+        return self.create_user(email, password=password, is_admin=True)
+
+    def create_superuser(self, email, password=None):
+        return self.create_user(email, password=password, is_admin=True)
+
+# Custom User Model
+class User(AbstractBaseUser, PermissionsMixin):
+    name = models.CharField(max_length=200, blank=True)
+    profile_pic = models.ImageField(upload_to="profile_pics/",blank=True,null=True)
+    company_name = models.CharField(max_length=200, blank=True)
+    email = models.EmailField(unique=True)
+    active = models.BooleanField(default=True)
+    customer = models.BooleanField(default=False)
+    admin = models.BooleanField(default=False)
+
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = []
+
+    objects = UserManager()
+
+    def __str__(self):
+        return self.email
+
+    @property
+    def is_staff(self):
+        return self.admin
+
+    @property
+    def is_superuser(self):
+        return self.admin
+    
+class PasswordResetOTP(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    otp = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    verified = models.BooleanField(default=False)
+
+    def expired(self):
+        return timezone.now() > self.created_at + timedelta(minutes=5)
+
+class CompanyProfile(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,related_name="company_profile",null=True,blank=True)
+    owner_name = models.CharField(max_length=200)
+    profile_pic = models.ImageField(upload_to="profile_pics/",blank=True,null=True)
+    company_name = models.CharField(max_length=200)
+    address= models.TextField()
+    phone = models.CharField(max_length=15)
+    seal = models.ImageField(
+        upload_to="company/seals/",
+        blank=True,
+        null=True
+    )
+    authorized_signature = models.ImageField(
+        upload_to="company/signatures/",
+        blank=True,
+        null=True
+    )
+
+    def __str__(self):
+        return self.company_name
+    
+class RepairRequest(models.Model):
+    STATUS_CHOICES = [
+        ('PENDING','PENDING'),
+        ('WAITING_FOR_APPROVAL','WAITING_FOR_APPROVAL'),
+        ('ACCEPTED','ACCEPTED'),
+        ('REJECTED',"REJECTED"),
+        # Admin side
+        ('STARTED','STARTED'),
+        ('REPAIRING','REPAIRING'),
+        ('TESTING','TESTING'),
+        ('READY_TO_DELIVER','READY_TO_DELIVER'),
+    ]
+
+    customer = models.ForeignKey(User, on_delete=models.CASCADE, related_name="repair_requests")
+    customer_name = models.CharField(max_length=200)
+    item_name = models.CharField(max_length=200)
+    problem_description =  models.TextField()
+    contact_info = models.CharField(max_length=15)
+    request_id = models.CharField(max_length=10, unique=True, editable=False, default="")
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default="PENDING")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="created_requests",null=True,blank=True)
+
+    def save(self, *args, **kwargs):
+        if not self.request_id:
+            self.request_id = get_random_string(length=8).upper()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.item_name} - ({self.request_id})"
+    
+    @property
+    def current_estimation_status(self):
+        latest = self.estimations.order_by("-created_at").first()
+        return latest.status if latest else "STARTED"
+    
+class Estimation(models.Model):
+    STATUS_CHOICES=[('WAITING_FOR_APPROVAL','WAITING_FOR_APPROVAL'),('STARTED','STARTED'), ('REPAIRING','REPAIRING'),('TESTING','TESTING'),('READY_TO_DELIVER','READY_TO_DELIVER')]
+    repair_request = models.ForeignKey(RepairRequest, on_delete=models.CASCADE, related_name="estimations")
+    status = models.CharField(max_length=30,choices=STATUS_CHOICES,default="WAITING_FOR_APPROVAL")
+    subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    tax = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    approved = models.BooleanField(null=True, blank=True, default=None)
+    created_at = models.DateTimeField(auto_now_add=True)
+    # invoice = models.ForeignKey("Invoice",on_delete=models.SET_NULL,null=True,blank=True,related_name="estimations")
+    started_date = models.DateTimeField(null=True, blank=True)
+    repairing_date = models.DateTimeField(null=True, blank=True)
+    testing_date = models.DateTimeField(null=True, blank=True)
+    ready_to_deliver_date = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Estimation for Request {self.repair_request_id}"
+
+    def calculate_totals(self):
+        total = Decimal("0.00")
+        for item in self.items.all():
+            total +=item.amount
+        self.subtotal = total
+        self.tax = Decimal("0.00")
+        self.total = total
+        self.save()
+    
+class Estimationitems(models.Model):
+    estimation = models.ForeignKey(Estimation,on_delete=models.CASCADE, related_name="items")
+    description = models.CharField(max_length=200)
+    quantity = models.PositiveIntegerField(default=1)
+    unit_price = models.DecimalField(decimal_places=2, max_digits=10)
+
+    @property
+    def amount(self):
+        return Decimal(self.quantity) *self.unit_price
+    def __str__(self):
+        return f"{self.description} x {self.quantity}"
+
+ 
+
+class EstimationFilter(django_filters.FilterSet):
+    requestId = django_filters.CharFilter(field_name='repair_request__requestId')
+
+    class Meta:
+        model = Estimation
+        fields = ['requestId']
+
+class Updaterepairstatus(models.Model):
+   UPDATE_STATUS_CHOICE=[
+        ('PENDING','PENDING'),
+        ('STARTED','STARTED'),
+        ('REPAIRING','REPAIRING'),
+        ('TESTING','TESTING'),
+        ('READY_TO_DELIVER','READY_TO_DELIVER'),
+        ('ACCEPTED', 'ACCEPTED'),  
+        ('REJECTED', 'REJECTED'), 
+       
+   ]
+  
+   update_status = models.CharField(max_length=50, choices=UPDATE_STATUS_CHOICE)
+   estimation=models.ForeignKey(Estimation,on_delete=models.CASCADE,related_name="updates",null=True,blank=True)
+   repairrequest = models.ForeignKey(RepairRequest, on_delete=models.CASCADE,related_name="updates")
+   description = models.CharField(max_length=100)
+   updated_on = models.DateField(auto_now_add=True)
+   class Meta:
+       ordering = ["updated_on","id"]
+
+
+class Invoice(models.Model):
+    estimation=models.ForeignKey(Estimation,on_delete=models.CASCADE,related_name="invoice",null=True,blank=True)
+    invoice_number = models.CharField(max_length=50,unique=True,null=True,blank=True)
+    repair_request = models.ForeignKey(RepairRequest, on_delete=models.CASCADE)
+    total_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    parts_replaced = models.TextField(blank=True,null=True)
+    notes = models.TextField(blank=True,null=True)  
+    generated_on = models.DateTimeField(auto_now_add=True)
+   
+
+    pdf_url = models.URLField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Invoice for {self.repair_request.request_id} - {self.total_amount}"
