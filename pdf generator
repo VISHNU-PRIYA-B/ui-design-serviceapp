@@ -27,7 +27,7 @@ def create_invoice_pdf(invoice):
     width, height = A4
     y = height - 50
 
-    # ---------------- COMPANY / SEAL / SIGNATURE ----------------
+    # COMPANY / SEAL / SIGNATURE
     company = None
     seal_path = None
     signature_path = None
@@ -41,11 +41,11 @@ def create_invoice_pdf(invoice):
         if company.authorized_signature:
             signature_path = company.authorized_signature.path
 
-    # ---------------- TITLE ----------------
+    #TITLE 
     p.setFont("DejaVuSans", 20)
     p.drawCentredString(width / 2, y, "INVOICE PREVIEW")
 
-    # ---------------- INVOICE INFO ----------------
+    #  INVOICE INFO 
     p.setFont("DejaVuSans", 12)
     y -= 50
     p.drawRightString(
@@ -75,18 +75,46 @@ def create_invoice_pdf(invoice):
         y -= 20
     y -= 20
 
-    # ---------------- ITEMS TABLE ----------------
-    estimation = invoice.repair_request.estimation
+    #  ITEMS TABLE 
+    # estimation = invoice.estimation
+    # if not estimation:
+    #     raise Exception("No estimation found for this repair request")
+
+        
+    # data = [["Description", "Quantity × Price", "Amount"]]
+
+    # items = estimation.items.all()
+    #  ITEMS TABLE  (ALL ESTIMATIONS)
+    estimations = invoice.repair_request.estimations.all()
+
+    if not estimations.exists():
+        raise Exception("No estimations found for this repair request")
+
     data = [["Description", "Quantity × Price", "Amount"]]
 
-    for item in estimation.items.all():
+    items = []
+    total = 0
+
+    for est in estimations:
+        for item in est.items.all():
+            items.append(item)
+            total += item.amount
+
+    # for item in items:
+    #     data.append([
+    #         item.description,
+    #         f"{item.quantity} × ₹{item.unit_price}",
+    #         f"₹{item.amount}"
+    #     ])
+    # data.append(["", "Total", f"₹{estimation.total}"])
+    for item in items:
         data.append([
             item.description,
             f"{item.quantity} × ₹{item.unit_price}",
             f"₹{item.amount}"
         ])
 
-    data.append(["", "Total", f"₹{estimation.total}"])
+    data.append(["", "Total", f"₹{total}"])
 
     table = Table(data, colWidths=[300, 100, 100])
     table.setStyle(TableStyle([
@@ -101,7 +129,7 @@ def create_invoice_pdf(invoice):
     table.wrapOn(p, width, height)
     table.drawOn(p, 50, y - (20 * len(data)))
 
-    # ---------------- SEAL & SIGNATURE ----------------
+    #  SEAL & SIGNATURE 
     base_y = 60
 
     # SEAL
@@ -132,11 +160,11 @@ def create_invoice_pdf(invoice):
         p.setFont("DejaVuSans", 10)
         p.drawString(sig_x + 40, base_y - 7, "Authorized Sign")
 
-    # ---------------- SAVE PDF ----------------
+    #  SAVE PDF 
     p.showPage()
     p.save()
 
-    # ---------------- UPDATE URL ----------------
+    #  UPDATE URL 
     pdf_url = f"{settings.MEDIA_URL}invoices/{file_name}"
     invoice.pdf_url = pdf_url
     invoice.save(update_fields=['pdf_url'])
