@@ -37,8 +37,6 @@ const COLORS = {
   rejectedText: "#721C24",
 };
 
-
-
 export default function ApproveEstimation() {
   const { token: contextToken } = useContext(UserContext);
   const [estimations, setEstimations] = useState<any[]>([]);
