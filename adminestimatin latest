@@ -161,9 +161,20 @@ export default function ApproveEstimation() {
       year: "numeric",
     });
 
+    const monthLong = dateObj
+      .toLocaleString("en-IN", { month: "long" })
+      .toLowerCase();
+    const monthShort = dateObj
+      .toLocaleString("en-IN", { month: "short" })
+      .toLowerCase();
+    const year = dateObj.getFullYear().toString();
+
     if (!acc[dateKey]) {
       acc[dateKey] = {
         date: dateKey,
+        monthLong,
+        monthShort,
+        year,
         items: [],
       };
     }
@@ -171,11 +182,23 @@ export default function ApproveEstimation() {
     acc[dateKey].items.push(item);
     return acc;
   }, {})
-).sort(
-  (a, b) =>
-    new Date(b.items[0].repairRequest.createdAt) -
-    new Date(a.items[0].repairRequest.createdAt)
-);
+)
+  
+  .filter(group => {
+    if (!search) return true;
+    const text = search.toLowerCase();
+    return (
+      group.monthLong.includes(text) ||
+      group.monthShort.includes(text) ||
+      group.year.includes(text)
+    );
+  })
+ 
+  .sort(
+    (a, b) =>
+      new Date(b.items[0].repairRequest.createdAt) -
+      new Date(a.items[0].repairRequest.createdAt)
+  );
   const getStatusColors = (status) => {
     switch (status) {
       case "READY_TO_DELIVER":
