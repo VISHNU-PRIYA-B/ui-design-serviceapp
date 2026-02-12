@@ -109,9 +109,9 @@ export default function ApproveEstimation() {
       // 🔹 Convert date to searchable strings
   const date = new Date(item.createdAt);
 
-  const monthName = date.toLocaleString("en-US", { month: "long" }).toLowerCase(); // february
-  const monthShort = date.toLocaleString("en-US", { month: "short" }).toLowerCase(); // feb
-  const year = date.getFullYear().toString(); // 2026
+  const monthName = date.toLocaleString("en-US", { month: "long" }).toLowerCase(); 
+  const monthShort = date.toLocaleString("en-US", { month: "short" }).toLowerCase(); 
+  const year = date.getFullYear().toString(); 
   
 
     return (
