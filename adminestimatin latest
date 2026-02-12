@@ -1,10 +1,10 @@
 // @ts-nocheck
-import React, {useEffect,useState,useContext,useLayoutEffect,useCallback,} from "react";
+import React, {useEffect,useState,useContext,useLayoutEffect,} from "react";
 import {View,Text,StyleSheet,TouchableOpacity,Alert,ActivityIndicator,Linking,ScrollView,TextInput,} from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import {graphqlRequest,setAuthToken,BACKEND_BASE_URL,} from "../services/api";
 import { UserContext } from "../components/ui/UserContext";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { useNavigation } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 /* COLORS */
@@ -18,25 +18,24 @@ const COLORS = {
   readyText: "#6B4B9E",
   rejected: "#F8D7DA",
   rejectedText: "#721C24",
-
-  accepted:"#b5d9b0",
-  acceptedText:"#4dd33c",
-  started:"#b8eee7",
-  startedText:"#179e8c",
-  repairing:"#f3e6ce",
-  repairingText:"#e88419",
-  testing:"#f1e2f4",
-  testingText:"#c96dd9"
+  accepted: "#b5d9b0",
+  acceptedText: "#4dd33c",
+  started: "#b8eee7",
+  startedText: "#179e8c",
+  repairing: "#f3e6ce",
+  repairingText: "#e88419",
+  testing: "#f1e2f4",
+  testingText: "#c96dd9",
 };
 
 export default function ApproveEstimation() {
   const { token: contextToken } = useContext(UserContext);
   const navigation = useNavigation();
+
   const [estimations, setEstimations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [showSearch, setShowSearch] = useState(false);
-  // const [menuVisible, setMenuVisible] = useState(false);
 
   /* HEADER */
   useLayoutEffect(() => {
@@ -46,7 +45,7 @@ export default function ApproveEstimation() {
       headerTintColor: "#fff",
       headerRight: () => (
         <TouchableOpacity
-          onPress={() => setShowSearch(prev => !prev)}
+          onPress={() => setShowSearch((p) => !p)}
           style={{ marginRight: 16 }}
         >
           <Text style={{ fontSize: 22, color: "#fff" }}>☰</Text>
@@ -54,12 +53,6 @@ export default function ApproveEstimation() {
       ),
     });
   }, [navigation]);
-
-  // useFocusEffect(
-  //   useCallback(() => {
-  //     return () => setMenuVisible(false);
-  //   }, [])
-  // );
 
   /* FETCH */
   const fetchMyEstimations = async () => {
@@ -69,51 +62,30 @@ export default function ApproveEstimation() {
     setAuthToken(token);
     setLoading(true);
 
-    // const query = `
-    //   query {
-    //     myEstimations {
-    //       id
-    //       status
-    //       invoice { pdfUrl }
-    //       repairRequest {
-    //         requestId
-    //         customerName
-    //         itemName
-    //         problemDescription
-    //         createdAt
-    //       }
-    //       items {
-    //         id
-    //         description
-    //         amount
-    //       }
-    //     }
-    //   }
-    // `;
     const query = `
-    query {
-      myEstimations {
-        id
-        status
-        createdAt
-        repairRequest {
-          requestId
-          customerName
-          itemName
-          problemDescription
+      query {
+        myEstimations {
+          id
+          status
           createdAt
-          invoice {
-            pdfUrl
+          repairRequest {
+            requestId
+            customerName
+            itemName
+            problemDescription
+            createdAt
+            invoice {
+              pdfUrl
+            }
+          }
+          items {
+            id
+            description
+            amount
           }
         }
-        items {
-          id
-          description
-          amount
-        }
       }
-    }
-  `;
+    `;
 
     try {
       const res = await graphqlRequest(query);
@@ -129,59 +101,82 @@ export default function ApproveEstimation() {
     fetchMyEstimations();
   }, []);
 
-  /* SEARCH FILTER */
-  const filteredEstimations = estimations.filter(item => {
+  /* SEARCH */
+  const filteredEstimations = estimations.filter((item) => {
     if (!search) return true;
     const text = search.toLowerCase();
+
+      // 🔹 Convert date to searchable strings
+  const date = new Date(item.createdAt);
+
+  const monthName = date.toLocaleString("en-US", { month: "long" }).toLowerCase(); // february
+  const monthShort = date.toLocaleString("en-US", { month: "short" }).toLowerCase(); // feb
+  const year = date.getFullYear().toString(); // 2026
+  
+
     return (
       item.repairRequest.customerName.toLowerCase().includes(text) ||
       item.repairRequest.itemName.toLowerCase().includes(text) ||
       item.repairRequest.problemDescription.toLowerCase().includes(text) ||
-      item.repairRequest.requestId.toLowerCase().includes(text)
+      item.repairRequest.requestId.toLowerCase().includes(text) ||
+
+      monthName.includes(text) ||
+      monthShort.includes(text) ||
+      year.includes(text) 
     );
   });
-  console.log("RAW ESTIMATIONS:", estimations);
 
-  /* GROUP BY REPAIR REQUEST ( KEY FIX) */
+  /* GROUP BY REQUEST */
   const groupedByRequest = Object.values(
     filteredEstimations.reduce((acc, est) => {
       const key = est.repairRequest.requestId;
       const estDate = new Date(est.createdAt);
-      console.log(est.status, est.createdAt);
 
       if (!acc[key]) {
         acc[key] = {
           repairRequest: est.repairRequest,
           status: est.status,
-          latestDate:estDate,
+          latestDate: estDate,
           items: [...est.items],
         };
       } else {
         acc[key].items.push(...est.items);
-
-        // if(est.invoice && !acc[key].invoice){
-        //   acc[key].invoice=est.invoice;
-        // }
-
-        // Prefer READY_TO_DELIVER
-        if (estDate>acc[key].latestDate) {
+        if (estDate > acc[key].latestDate) {
           acc[key].status = est.status;
-          acc[key].latestDate=estDate;
-          
+          acc[key].latestDate = estDate;
         }
       }
       return acc;
     }, {})
   );
 
-  /* SORT */
-  const sortedData = groupedByRequest.sort(
-    (a, b) =>
-      new Date(b.repairRequest.createdAt) -
-      new Date(a.repairRequest.createdAt)
-  );
+  /* GROUP BY DATE */
+ const groupedData = Object.values(
+  groupedByRequest.reduce((acc, item) => {
+    const dateObj = new Date(item.repairRequest.createdAt);
 
-  const getStatusColors = status => {
+    const dateKey = dateObj.toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+
+    if (!acc[dateKey]) {
+      acc[dateKey] = {
+        date: dateKey,
+        items: [],
+      };
+    }
+
+    acc[dateKey].items.push(item);
+    return acc;
+  }, {})
+).sort(
+  (a, b) =>
+    new Date(b.items[0].repairRequest.createdAt) -
+    new Date(a.items[0].repairRequest.createdAt)
+);
+  const getStatusColors = (status) => {
     switch (status) {
       case "READY_TO_DELIVER":
         return { bg: COLORS.ready, text: COLORS.readyText };
@@ -195,7 +190,6 @@ export default function ApproveEstimation() {
         return { bg: COLORS.repairing, text: COLORS.repairingText };
       case "TESTING":
         return { bg: COLORS.testing, text: COLORS.testingText };
-
       default:
         return { bg: COLORS.pending, text: COLORS.pendingText };
     }
@@ -217,8 +211,7 @@ export default function ApproveEstimation() {
       colors={[COLORS.gradientStart, COLORS.gradientEnd]}
       style={styles.container}
     >
-      <ScrollView contentContainerStyle={styles.contentContainer}>
-        {showSearch && (
+              {showSearch && (
           <View style={styles.searchBox}>
             <TextInput
               placeholder="Search..."
@@ -228,110 +221,93 @@ export default function ApproveEstimation() {
             />
           </View>
         )}
+      
+ 
+      <ScrollView  contentContainerStyle={[styles.contentContainer,{ paddingTop: showSearch ? 20 : 13 }, ]}>
 
-        {sortedData.map(item => {
-            console.log(
-              "REQ:",
-              item.repairRequest.requestId,
-              "STATUS:",
-              item.status,
-              "INVOICE:", item.repairRequest.invoice
-            );
-          const total = item.items.reduce(
-            (sum, i) => sum + Number(i.amount),
-            0
-          );
-          const statusColors = getStatusColors(item.status);
 
-          return (
-            <View key={item.repairRequest.requestId}>
-              <Text style={styles.dateHeader}>
-                {new Date(item.repairRequest.createdAt).toLocaleDateString(
-                  "en-IN",
-                  { day: "2-digit", month: "short", year: "numeric" }
-                )}
-              </Text>
+        {groupedData.map((group) => (
+          <View key={group.date}>
+            <Text style={styles.dateHeader}>{group.date}</Text>
 
-              <View style={styles.card}>
-                <View style={styles.cardHeader}>
-                  <Text style={{ flexShrink: 1, paddingRight: 8 }}>Name: {item.repairRequest.customerName}</Text>
-                  <View
-                    style={[
-                      styles.statusBadge,
-                      { backgroundColor: statusColors.bg },
-                    ]}
-                  >
-                    <Text style={{     color: statusColors.text,fontWeight: "600",fontSize: 12, }}   numberOfLines={1}ellipsizeMode="tail">
-                      {item.status.replaceAll("_", " ")}
+            {group.items.map((item) => {
+              const total = item.items.reduce(
+                (s, i) => s + Number(i.amount),
+                0
+              );
+              const statusColors = getStatusColors(item.status);
+
+              return (
+                <View
+                  key={item.repairRequest.requestId}
+                  style={styles.card}
+                >
+                  <View style={styles.cardHeader}>
+                    <Text style={{ flexShrink: 1 }}>
+                      Name: {item.repairRequest.customerName}
                     </Text>
-                  </View>
-                </View>
-
-                <Text>Item: {item.repairRequest.itemName}</Text>
-                <Text>Problem: {item.repairRequest.problemDescription}</Text>
-
-                {item.items.map(i => (
-                  <View key={i.id} style={styles.itemRow}>
-                    <Text style={{ flex: 1, flexShrink: 1 }}>• {i.description}</Text>
-                    <Text style={{ marginLeft: 8 }}>₹{i.amount}</Text>
-                  </View>
-                ))}
-
-                <View style={styles.totalRow}>
-                  <Text style={{ fontWeight: "700", fontSize: 15 }}>Total</Text>
-                  <Text  style={{ fontWeight: "700", fontSize: 15 }}>₹{total}</Text>
-                </View>
-
-                {/* {item.status === "READY_TO_DELIVER" &&
-                  item.invoice?.pdfUrl && (
-                    <TouchableOpacity
-                      onPress={() => {
-                        const url = item.invoice.pdfUrl.startsWith("http")
-                          ? item.invoice.pdfUrl
-                          : `${BACKEND_BASE_URL}${item.invoice.pdfUrl}`;
-                        Linking.openURL(url);
-                      }}
+                    <View
+                      style={[
+                        styles.statusBadge,
+                        { backgroundColor: statusColors.bg },
+                      ]}
                     >
-                      <Text style={styles.invoice}>📄 View Invoice</Text>
-                    </TouchableOpacity>
-                  )} */}
-                  {/* {item.status === "READY_TO_DELIVER" &&
-                    item.invoice &&
-                    item.invoice.pdfUrl && (
-                      <TouchableOpacity
-                        onPress={() => {
-                          const url = item.invoice.pdfUrl.startsWith("http")
-                            ? item.invoice.pdfUrl
-                            : `${BACKEND_BASE_URL}${item.invoice.pdfUrl}`;
-                          Linking.openURL(url);
+                      <Text
+                        style={{
+                          color: statusColors.text,
+                          fontSize: 12,
+                          fontWeight: "600",
                         }}
                       >
-                        <Text style={styles.invoice}>📄 View Invoice</Text>
-                      </TouchableOpacity>
-                  )} */}
+                        {item.status.replaceAll("_", " ")}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text>Item: {item.repairRequest.itemName}</Text>
+                  <Text>
+                    Problem: {item.repairRequest.problemDescription}
+                  </Text>
+
+                  {item.items.map((i) => (
+                    <View key={i.id} style={styles.itemRow}>
+                      <Text style={{ flex: 1 }}>• {i.description}</Text>
+                      <Text>₹{i.amount}</Text>
+                    </View>
+                  ))}
+
+                  <View style={styles.totalRow}>
+                    <Text style={{ fontWeight: "700" }}>Total</Text>
+                    <Text style={{ fontWeight: "700" }}>₹{total}</Text>
+                  </View>
+
                   {item.status === "READY_TO_DELIVER" &&
-                    item.repairRequest.invoice &&
-                    item.repairRequest.invoice.pdfUrl && (
+                    item.repairRequest.invoice?.pdfUrl && (
                       <TouchableOpacity
                         onPress={() => {
                           const url =
-                            item.repairRequest.invoice.pdfUrl.startsWith("http")
+                            item.repairRequest.invoice.pdfUrl.startsWith(
+                              "http"
+                            )
                               ? item.repairRequest.invoice.pdfUrl
                               : `${BACKEND_BASE_URL}${item.repairRequest.invoice.pdfUrl}`;
                           Linking.openURL(url);
                         }}
                       >
-                        <Text style={styles.invoice}>📄 View Invoice</Text>
+                        <Text style={styles.invoice}>
+                          📄 View Invoice
+                        </Text>
                       </TouchableOpacity>
                     )}
-                                  </View>
-                                </View>
-                              );
-                            })}
-                          </ScrollView>
-                        </LinearGradient>
-                      );
-                    }
+                </View>
+              );
+            })}
+          </View>
+        ))}
+      </ScrollView>
+    </LinearGradient>
+  );
+}
 
 /* STYLES */
 const styles = StyleSheet.create({
@@ -339,14 +315,16 @@ const styles = StyleSheet.create({
   contentContainer: { padding: 16 },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
 
-  searchBox: {
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 16,
-  },
-  searchInput: { fontSize: 16 },
 
+
+searchBox: {
+  backgroundColor: "#fff",
+  borderRadius: 14,
+  padding: 12,
+  elevation: 4,
+},
+
+  searchInput: { fontSize: 16 },
   card: {
     backgroundColor: "#fff",
     borderRadius: 20,
@@ -356,16 +334,13 @@ const styles = StyleSheet.create({
   cardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-
-    alignItems:"center",
-    marginBottom:6,
+    alignItems: "center",
+    marginBottom: 6,
   },
   statusBadge: {
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 20,
-    alignSelf: "flex-start",  
-    
   },
   itemRow: {
     flexDirection: "row",
@@ -373,13 +348,11 @@ const styles = StyleSheet.create({
     marginVertical: 4,
   },
   totalRow: {
-  flexDirection: "row",
-  justifyContent: "space-between",
-  alignItems: "center",
-  marginTop: 12,
-  paddingTop: 10,
-  borderTopWidth: 1,
-
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
   },
   invoice: {
     textAlign: "center",
@@ -393,4 +366,3 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
 });
-
