@@ -1,21 +1,15 @@
 // @ts-nocheck
-import React, { useState, useContext, useCallback } from "react";
-import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  ActivityIndicator,
-  StyleSheet,
-} from "react-native";
+import React, { useState, useContext, useCallback,useLayoutEffect } from "react";
+import {View,Text,ScrollView,TouchableOpacity,ActivityIndicator,StyleSheet,} from "react-native";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import { graphqlRequest } from "../services/api";
 import { UserContext } from "../components/ui/UserContext";
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from "@expo/vector-icons";
 
-/* COLORS */
+
 const COLORS = {
-  // Purple gradient background like in the image
+
   gradientStart: "#8B7FE8",
   gradientEnd: "#A89DEF",
   white: "#FFFFFF",
@@ -43,6 +37,8 @@ const COLORS = {
   readyText: "#6B4B9E",
   rejected: "#F8D7DA",
   rejectedText: "#721C24",
+  WaitingForApproval:"#FFF3CD",
+  WaitingForApprovalText:"#856404",
 };
 
 /* GRAPHQL */
@@ -54,7 +50,11 @@ const ALL_REQUESTS_QUERY = `
       problemDescription
       contactInfo
       createdAt
+      estimations{
       status
+      approved
+      createdAt
+      }
     }
   }
 `;
@@ -62,12 +62,15 @@ const ALL_REQUESTS_QUERY = `
 const MY_REQUESTS_QUERY = `
   query {
     myRequests {
-      requestId
       itemName
       problemDescription
       contactInfo
       createdAt
+      estimations{
       status
+      approved
+      createdAt
+      }
     }
   }
 `;
@@ -98,6 +101,12 @@ export default function ViewRequest() {
       setLoading(false);
     }
   };
+
+    useLayoutEffect(() => {
+      navigation.setOptions({
+        headerShown: false,
+      });
+    }, [navigation]);
 
   useFocusEffect(
     useCallback(() => {
@@ -157,13 +166,16 @@ export default function ViewRequest() {
         return { bg: COLORS.ready, text: COLORS.readyText };
       case "REJECTED":
         return { bg: COLORS.rejected, text: COLORS.rejectedText };
+      case "WAITING_FOR_APPROVAL":
+        return {bg: COLORS.WaitingForApproval, text: COLORS.WaitingForApprovalText};
       default:
         return { bg: "#EEE", text: "#333" };
     }
   };
 
   const formatStatus = (status) => {
-    return status.replaceAll("_", " ");
+    if(!status) return "PENDING";
+    return status.replaceAll(/_/g, " ");
   };
 
   // Check if there are no requests
@@ -183,7 +195,6 @@ export default function ViewRequest() {
       </LinearGradient>
     );
   }
-
   /* UI */
   return (
     <LinearGradient
@@ -195,6 +206,14 @@ export default function ViewRequest() {
         contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
       >
+                      <View style={styles.headerTop}>
+                  <TouchableOpacity 
+                    style={styles.backButton}
+                    onPress={() => navigation.goBack()}
+                  >
+                    <Ionicons name="arrow-back" size={24} color="#fff" />
+                  </TouchableOpacity>
+                        </View>
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>
@@ -215,7 +234,25 @@ export default function ViewRequest() {
             </View>
 
             {groupedData[date].map((req) => {
-              const statusColors = getStatusColors(req.status);
+              const latestEstimation =
+  req.estimations
+    ?.slice()
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
+
+let displayStatus = latestEstimation?.status ||req.status;
+
+// 🔑 KEY FIX
+if (
+  latestEstimation?.approved === true &&
+  latestEstimation?.status === "WAITING_FOR_APPROVAL"
+) {
+  displayStatus = "APPROVED";
+}
+
+              const statusColors = getStatusColors(displayStatus);
+              const isPending = displayStatus === "PENDING";
+              const isWaiting = displayStatus === "WAITING_FOR_APPROVAL";
+              const hasEstimation = req.estimations && req.estimations.length > 0;
               
               return (
                 <View key={req.requestId} style={styles.cardOuter}>
@@ -240,7 +277,7 @@ export default function ViewRequest() {
                             { color: statusColors.text },
                           ]}
                         >
-                          {formatStatus(req.status)}
+                          {formatStatus(displayStatus)}
                         </Text>
                       </View>
                     </View>
@@ -299,11 +336,31 @@ export default function ViewRequest() {
                           >
                             <Text style={styles.accentText}>Add Estimation</Text>
                           </TouchableOpacity>
-
+                          </>
+                      )}
+                          {isWaiting && (
+                            <>
                           <TouchableOpacity
                             style={styles.secondaryButton}
                             onPress={() =>
-                              navigation.navigate("AdminEstimation", {
+                              navigation.navigate("ApproveEstimation", {
+                                requestId: req.requestId,
+                              })
+                            }
+                            activeOpacity={0.8}
+                          >
+                            <Text style={styles.secondaryText}>
+                              Approve Estimation
+                            </Text>
+                          </TouchableOpacity>
+                        </>
+                      )}
+                      {hasEstimation && !isPending && !isWaiting &&(
+                        <>
+                        <TouchableOpacity
+                            style={styles.secondaryButton}
+                            onPress={() =>
+                              navigation.navigate("ApproveEstimation", {
                                 requestId: req.requestId,
                               })
                             }
@@ -654,5 +711,14 @@ const styles = StyleSheet.create({
 
   bottomPadding: {
     height: 20,
+  },
+      backButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 30,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 5,
   },
 });
