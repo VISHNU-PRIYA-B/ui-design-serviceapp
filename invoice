@@ -1,0 +1,596 @@
+// @ts-nocheck
+import React, { useState, useLayoutEffect, useEffect } from "react";
+import {View,Text,TouchableOpacity,ScrollView,ActivityIndicator,StyleSheet,Linking,Modal,Alert,} from "react-native";
+import { graphqlRequest, BACKEND_BASE_URL } from "../services/api";
+import { useLogout } from "../hooks/Logout";
+import { useNavigation, useRoute } from "@react-navigation/native";
+import { openWhatsApp } from "../utils/whatsapp";
+import { LinearGradient } from "expo-linear-gradient";
+import { Ionicons } from "@expo/vector-icons";
+
+const LABELS={
+  contactInfo:"Contact Info",
+  customerName: "Customer Name",
+  itemName:"Item Name",
+  problemDescription:"Problem Description",
+  requestId:"Request Id"
+}
+
+export default function Invoice() {
+  const navigation = useNavigation();
+  const route = useRoute<any>();
+  const logout = useLogout();
+  const requestId = route.params?.requestId;
+  const [repairData, setRepairData] = useState<any>(null);
+  const [totalAmount, setTotalAmount] = useState("0");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [pdfUrl, setPdfUrl] = useState("");
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  
+
+  useLayoutEffect(() => {
+    navigation.setOptions({ headerShown: false });
+  }, [navigation]);
+
+  const getInvoiceUrl = () => {
+    if (!pdfUrl) return "";
+    return pdfUrl.startsWith("/") ? BACKEND_BASE_URL + pdfUrl : pdfUrl;
+  };
+
+  const fetchDetails = async (id: string) => {
+    setLoading(true);
+    setMessage("");
+    setRepairData(null);
+
+    const query = `
+      query ($requestId: String!) {
+        repairRequest(requestId: $requestId) {
+          requestId
+          customerName
+          itemName
+          problemDescription
+          contactInfo
+          estimations {
+            total
+            items {
+              description
+              quantity
+              unitPrice
+              amount
+            }
+          }
+        }
+      }
+    `;
+
+    try {
+      const res = await graphqlRequest(query, { requestId: id });
+      const data = res?.repairRequest || null;
+
+      setRepairData(data);
+
+      const total = data?.estimations?.reduce(
+        (sum: number, e: any) => sum + Number(e.total || 0),
+        0
+      );
+
+      setTotalAmount(String(total || 0));
+    } catch (err: any) {
+      setMessage(err.message || "Failed to load invoice data");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!requestId) {
+      Alert.alert("Request ID missing");
+      navigation.goBack();
+      return;
+    }
+    fetchDetails(requestId);
+  }, [requestId]);
+
+  const generateInvoice = async () => {
+    if (!requestId || !totalAmount) {
+      Alert.alert("Missing request data");
+      return;
+    }
+
+    const itemCount =
+    repairData?.estimations?.reduce(
+      (count: number, est: any) => count + (est.items?.length || 0),
+      0
+    ) || 0;
+
+  console.log("Sending items to backend:", itemCount);
+
+    setLoading(true);
+
+    const mutation = `
+      mutation ($requestId: String!, $totalAmount: Decimal!) {
+        generateInvoice(requestId: $requestId, totalAmount: $totalAmount) {
+          invoice {
+            invoiceNumber
+            pdfUrl
+          }
+        }
+      }
+    `;
+
+    try {
+      const response = await graphqlRequest(mutation, {
+        requestId,
+        totalAmount: Number(totalAmount),
+      });
+
+      const url = response?.generateInvoice?.invoice?.pdfUrl;
+      if (!url) throw new Error("PDF URL not returned");
+
+      setPdfUrl(url);
+      setShowWhatsAppModal(true);
+      setMessage("Invoice generated successfully!");
+    } catch (err: any) {
+      setMessage(err.message || "Invoice generation failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openPdf = async () => {
+    const finalUrl = getInvoiceUrl();
+    if (!finalUrl) return;
+
+    const supported = await Linking.canOpenURL(finalUrl);
+    if (!supported) {
+      Alert.alert("No app found to open PDF");
+      return;
+    }
+    Linking.openURL(finalUrl);
+  };
+
+  return (
+    <View style={styles.container}>
+      <LinearGradient
+        colors={["#9B7EDE", "#8B6FD6", "#7C5FCE"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.gradientHeader}
+      >
+<View style={styles.headerTop}>
+  <TouchableOpacity
+    style={styles.backBtn}
+    onPress={() => navigation.goBack()}
+  >
+     <Ionicons name="arrow-back" size={25} color="#fff"  />
+  </TouchableOpacity>
+
+  <Text style={styles.headerTitle}>Invoice</Text>
+</View>
+
+      </LinearGradient>
+
+      <Modal transparent visible={showWhatsAppModal} animationType="fade">
+        <View style={styles.modalBackground}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Invoice Generated</Text>
+            <Text style={styles.modalMessage}>
+              Do you want to send the invoice to the customer via WhatsApp?
+            </Text>
+
+            <View style={styles.buttonRow}>
+              <TouchableOpacity
+                onPress={() => setShowWhatsAppModal(false)}
+                style={[styles.modalButton, styles.cancelButton]}
+              >
+                <Text style={styles.modalButtonText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalButton, styles.sendButton]}
+                onPress={() => {
+                  setShowWhatsAppModal(false);
+                  openWhatsApp(
+                    repairData?.contactInfo,
+                    ` Invoice Generated
+
+Request ID: ${repairData?.requestId}
+Item: ${repairData?.itemName}
+Total Amount: ₹${totalAmount}
+
+ Download Invoice:
+${getInvoiceUrl()}
+
+Thank you for choosing our service.`
+                  );
+                }}
+              >
+                <Text style={styles.modalButtonText}>Send</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <ScrollView style={styles.scrollView}>
+        <View style={styles.cardContainer}>
+          <View style={styles.card}>
+            {loading && (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#8B6FD6" />
+              </View>
+            )}
+
+            {repairData && (
+              <>
+                <Text style={styles.sectionTitle}>Invoice Preview</Text>
+
+                {/* DETAILS */}
+                <View style={styles.detailsSection}>
+                  {["customerName", "contactInfo", "itemName", "problemDescription", "requestId"].map(
+                    (key, i) => (
+                      <View key={i} style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>
+                          {LABELS[key]}:
+                        </Text>
+                        <Text style={styles.detailValue}>
+                          {" "}{repairData[key]}
+                        </Text>
+                      </View>
+                    )
+                  )}
+                </View>
+
+                <View style={styles.divider} />
+
+                <Text style={styles.subHeader}>Estimation Items</Text>
+
+                <View style={styles.tableHeader}>
+                  <Text style={[styles.tableHeaderText, { flex: 2 }]}>
+                    Description
+                  </Text>
+                  <Text
+                    style={[
+                      styles.tableHeaderText,
+                      { flex: 1, textAlign: "center" },
+                    ]}
+                  >
+                    Qty × Price
+                  </Text>
+                  <Text
+                    style={[
+                      styles.tableHeaderText,
+                      { flex: 1, textAlign: "right" },                 
+                    ]}
+                  >
+                    Amount
+                  </Text>
+                </View>
+
+                {repairData.estimations.map((est: any, ei: number) =>
+                  est.items.map((item: any, i: number) => (
+                    <View key={`${ei}-${i}`} style={styles.itemRow}>
+                      <Text style={[styles.itemText, { flex: 2 }]}>
+                        {item.description}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.itemText,
+                          { flex: 1, textAlign: "center" },
+                        ]}
+                      >
+                        {item.quantity} × ₹{item.unitPrice}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.itemAmount,
+                          { flex: 1, textAlign: "right" },
+                        ]}
+                      >
+                        ₹{item.amount}
+                      </Text>
+                    </View>
+                  ))
+                )}
+
+                <View style={styles.divider} />
+
+                <View style={styles.totalContainer}>
+                  <Text style={styles.totalLabel}>Total:</Text>
+                  <Text style={styles.totalAmount}>₹{totalAmount}</Text>
+                </View>
+
+                <TouchableOpacity
+                  onPress={generateInvoice}
+                  style={styles.generateButton}
+                  disabled={loading}
+                >
+                  <Text style={styles.generateButtonText}>
+                    Generate Invoice
+                  </Text>
+                </TouchableOpacity>
+
+                {pdfUrl !== "" && (
+                  <TouchableOpacity style={styles.pdfButton} onPress={openPdf}>
+                    <Text style={styles.pdfButtonText}>📄 View Invoice PDF</Text>
+                  </TouchableOpacity>
+                )}
+
+                {!!message && <Text style={styles.message}>{message}</Text>}
+              </>
+            )}
+          </View>
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#F3F4F6",
+  },
+
+  gradientHeader: {
+    paddingTop: 50,
+    paddingBottom: 40,
+    paddingHorizontal: 20,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+  },
+
+headerTop: {
+  height: 40,
+  justifyContent: "center",
+  alignItems: "center",
+  position: "relative",
+},
+
+backBtn: {
+  position: "absolute",
+  left: 16,
+  top: 0,
+  bottom: 0,
+  justifyContent: "center",
+  color:"#FFF",
+  fontSize: 18,
+},
+
+headerTitle: {
+  fontSize: 20,
+  fontWeight: "700",
+  color: "#FFF",
+},
+
+
+
+headerTitle: {
+  fontSize: 20,
+  fontWeight: "700",
+  color: "#FFF",
+},
+
+  scrollView: {
+    paddingTop: 60, 
+    flex: 1,
+    paddingBottom:20,
+  },
+
+  cardContainer: {
+    marginTop: -30,
+    paddingHorizontal: 20,
+  },
+
+  card: {
+    backgroundColor: "#FFF",
+    borderRadius: 24,
+    padding: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 8,
+    marginBottom:500,
+  },
+
+  loadingContainer: {
+    paddingVertical: 40,
+    alignItems: "center",
+  },
+
+  sectionTitle: {
+    fontSize: 25,
+    fontWeight: "800",
+    color: "#111827",
+    marginBottom: 40,
+  },
+
+  detailsSection: {
+    backgroundColor: "#F9FAFB",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+
+  detailRow: {
+    flexDirection: "row",
+    marginBottom: 8,
+  },
+
+  detailLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#6B7280",
+    width: 110,
+  },
+
+  detailValue: {
+    fontSize: 14,
+    color: "#111827",
+    flex: 1,
+    marginLeft:4,
+  },
+
+  divider: {
+    height: 1,
+    backgroundColor: "#E5E7EB",
+    marginVertical: 16,
+  },
+
+  subHeader: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 12,
+  },
+
+  tableHeader: {
+    flexDirection: "row",
+    paddingVertical: 10,
+    borderBottomWidth: 2,
+    borderBottomColor: "#E5E7EB",
+    marginBottom: 8,
+  },
+
+  tableHeaderText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#6B7280",
+  },
+
+  itemRow: {
+    flexDirection: "row",
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
+  },
+
+  itemText: {
+    fontSize: 14,
+    color: "#374151",
+  },
+
+  itemAmount: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#111827",
+  },
+
+  totalContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#F9FAFB",
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+
+  totalLabel: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#111827",
+  },
+
+  totalAmount: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#8B6FD6",
+  },
+
+  generateButton: {
+    backgroundColor: "#4ADE80",
+    paddingVertical: 16,
+    borderRadius: 16,
+    alignItems: "center",
+    marginTop: 8,
+    elevation: 4,
+  },
+
+  generateButtonText: {
+    color: "#111827",
+    fontSize: 17,
+    fontWeight: "700",
+  },
+
+  pdfButton: {
+    backgroundColor: "#8B6FD6",
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: "center",
+    marginTop: 12,
+    elevation: 4,
+  },
+
+  pdfButtonText: {
+    color: "#FFF",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+
+  message: {
+    marginTop: 16,
+    textAlign: "center",
+    fontSize: 14,
+    color: "#6B7280",
+    fontWeight: "600",
+  },
+
+  modalBackground: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+
+  modalBox: {
+    backgroundColor: "#FFF",
+    padding: 24,
+    borderRadius: 16,
+    width: "100%",
+    maxWidth: 400,
+  },
+
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    marginBottom: 12,
+    color: "#111827",
+  },
+
+  modalMessage: {
+    fontSize: 14,
+    marginBottom: 24,
+    color: "#6B7280",
+    lineHeight: 20,
+  },
+
+  buttonRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+
+  modalButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+
+  cancelButton: {
+    backgroundColor: "#9CA3AF",
+  },
+
+  sendButton: {
+    backgroundColor: "#4ADE80",
+  },
+
+  modalButtonText: {
+    color: "#111827",
+    fontWeight: "600",
+    fontSize: 15,
+  },
+});
