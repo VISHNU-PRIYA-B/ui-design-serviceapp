@@ -41,12 +41,24 @@ const COLORS = {
   WaitingForApprovalText:"#856404",
 };
 
+const STATUS_LABELS = {
+  PENDING: "Pending",
+  STARTED: "Started",
+  REPAIRING: "Repairing",
+  TESTING: "Testing",
+  READY_TO_DELIVER: "Ready to Deliver",
+  WAITING_FOR_APPROVAL: "Waiting for Approval",
+  ACCEPTED: "Accepted",
+  REJECTED: "Rejected",
+};
+
 /* GRAPHQL */
 const ALL_REQUESTS_QUERY = `
   query {
     allRequests {
       requestId
       itemName
+      customerName
       problemDescription
       contactInfo
       createdAt
@@ -64,6 +76,7 @@ const MY_REQUESTS_QUERY = `
     myRequests {
       itemName
       problemDescription
+      customerName
       contactInfo
       createdAt
       estimations{
@@ -173,10 +186,10 @@ export default function ViewRequest() {
     }
   };
 
-  const formatStatus = (status) => {
-    if(!status) return "PENDING";
-    return status.replaceAll(/_/g, " ");
-  };
+const formatStatus = (status) => {
+  if (!status) return "Pending";
+  return STATUS_LABELS[status] ?? status;
+};
 
   // Check if there are no requests
   if (Object.keys(groupedData).length === 0) {
@@ -284,13 +297,17 @@ if (
 
                     {/* Request ID */}
                     <View style={styles.idRow}>
-                      <Text style={styles.idLabel}>ID:</Text>
+                      <Text style={styles.idLabel}>ID :</Text>
                       <Text style={styles.idValue}>{req.requestId}</Text>
+                      </View>
+                      <View style={styles.idCustomerName}>
+                      <Text style={styles.idName}>Name : </Text>
+                      <Text style={styles.idNameValue}>{req.customerName}</Text>
                     </View>
 
                     {/* Problem Description */}
                     <View style={styles.problemBox}>
-                      <Text style={styles.problemLabel}>Problem</Text>
+                      <Text style={styles.problemLabel}>Problem </Text>
                       <Text style={styles.problemText}>
                         {req.problemDescription}
                       </Text>
@@ -553,7 +570,6 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: 11,
     fontWeight: "700",
-    textTransform: "uppercase",
     letterSpacing: 0.5,
   },
 
@@ -576,6 +592,23 @@ const styles = StyleSheet.create({
     fontFamily: "monospace",
   },
 
+    idCustomerName: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+  idName:{
+    fontSize: 13,
+    color: COLORS.textMuted,
+  },
+  idNameValue:{
+    fontSize: 13,
+    fontWeight: "600",
+    color: COLORS.textDark,
+    fontFamily: "monospace",
+
+  },
+
   problemBox: {
     backgroundColor: COLORS.sectionBg,
     borderRadius: 14,
@@ -587,7 +620,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
     color: COLORS.textMuted,
-    textTransform: "uppercase",
     letterSpacing: 0.5,
     marginBottom: 6,
   },
