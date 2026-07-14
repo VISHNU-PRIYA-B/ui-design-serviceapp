@@ -2,11 +2,18 @@
 import React, { useEffect, useState, useContext, useLayoutEffect } from "react";
 import {View,Text,StyleSheet,TouchableOpacity,Alert,ActivityIndicator,Linking,ScrollView,} from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { graphqlRequest, setAuthToken, BACKEND_BASE_URL } from "../services/api";
+import {graphqlRequest,setAuthToken,BACKEND_BASE_URL,} from "../services/api";
 import { UserContext } from "../components/ui/UserContext";
 import { useLogout } from "../hooks/Logout";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+
+const STATUS_LABELS={
+  ACCEPTED:"Accepted",
+  REJECTED:"Rejected",
+  WAITING_FOR_APPROVAL:"Waiting for Approval",
+
+}
 
 /* COLORS */
 const COLORS = {
@@ -21,136 +28,101 @@ const COLORS = {
   success: "#27AE60",
   danger: "#E74C3C",
   link: "#3498DB",
-
   pending: "#FFF3CD",
   pendingText: "#856404",
-  ready: "#E5D9F2",
-  readyText: "#6B4B9E",
   rejected: "#F8D7DA",
   rejectedText: "#721C24",
 };
 
 export default function ApproveEstimation() {
-  const route = useRoute<any>();
+  const route = useRoute();
   const { requestId } = route.params;
 
   const { token: contextToken } = useContext(UserContext);
   const navigation = useNavigation();
   const logout = useLogout();
 
-  const [estimation, setEstimation] = useState<any>(null);
+  const [estimations, setEstimations] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  /* HEADER */
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerRight: () => (
-        <TouchableOpacity onPress={logout} style={{ marginRight: 15 }}>
-          <Text style={{ color: "#E74C3C", fontWeight: "bold" }}>Logout</Text>
-        </TouchableOpacity>
-      ),
-    });
-  }, []);
+  /* FETCH ESTIMATIONS */
+  const fetchEstimations = async () => {
+    const token = contextToken || (await AsyncStorage.getItem("token"));
 
-  /* FETCH SINGLE ESTIMATION */
-  const fetchMyEstimation = async () => {
-  const token = contextToken || (await AsyncStorage.getItem("token"));
-
-  if (!token || !requestId) {
-    console.log("Missing token or estimationId");
-    setLoading(false);
-    return;
-  }
-
-  setAuthToken(token);
-  setLoading(true);
-
-  const query = `
-    query MyEstimation($requestId: String!) {
-  myEstimation(requestId: $requestId) {
-    id
-    total
-    approved
-    invoice {
-      invoiceNumber
-      pdfUrl
+    if (!token || !requestId) {
+      setLoading(false);
+      return;
     }
-    repairRequest {
-      requestId
-      itemName
-      problemDescription
-      status
-      createdAt
-    }
-    items {
-      id
-      description
-      quantity
-      unitPrice
-      amount
-    }
-  }
-}
+    setAuthToken(token);
+    setLoading(true);
 
-  `;
-
-  try {
-    const res = await graphqlRequest(query, { requestId });
-    console.log("Fetched estimation:", res);
-    setEstimation(res?.myEstimation || []);
-  } catch (e) {
-    Alert.alert("No estimation has been added");
-  } finally {
-    setLoading(false);
-  }
-};
-
-
-  useEffect(() => {
-    fetchMyEstimation();
-  }, [requestId]);
-
-  /* APPROVE / REJECT */
-const updateApproval = async (approved) => {
-  try {
-    const mutation = `
-      mutation ApproveEstimation($requestId: String!, $approved: Boolean!) {
-        approveEstimation(requestId: $requestId, approved: $approved) {
-          success
-          estimation {
+    const query = `
+      query MyRequestEstimations($requestId: String!) {
+        myRequestEstimations(requestId: $requestId) {
+          id
+          total
+          approved
+          invoice {
+            invoiceNumber
+            pdfUrl
+          }
+          repairRequest {
+            requestId
+            itemName
+            problemDescription
+            status
+          }
+          items {
             id
+            description
+            quantity
+            unitPrice
+            amount
           }
         }
       }
     `;
 
-    await graphqlRequest(mutation, {
-      requestId,
-      approved,
-    });
+    try {
+      const res = await graphqlRequest(query, { requestId });
+      setEstimations(res?.myRequestEstimations || []);
+    } catch (e) {
+      Alert.alert("Info", "No estimation has been added yet");
+      setEstimations([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    Alert.alert(
-      "Success",
-      approved ? "Estimation approved" : "Estimation rejected"
-    );
+  useEffect(() => {
+    fetchEstimations();
+  }, [requestId]);
 
-    fetchMyEstimation();
-  } catch (e) {
-    console.error("Approve error", e);
-    Alert.alert("Error", "Action failed");
-  }
-};
+  /* APPROVE / REJECT */
+  const updateApproval = async (estimationId, approved) => {
+    try {
+      const mutation = `
+        mutation ApproveEstimation($estimationId: ID!, $approved: Boolean!) {
+          approveEstimation(estimationId: $estimationId, approved: $approved) {
+            success
+          }
+        }
+      `;
 
+      await graphqlRequest(mutation, {
+        estimationId,
+        approved,
+      });
 
-  const getStatusStyle = (status: string) => {
-  
-    if (status === "PENDING")
-      return { bg: COLORS.pending, text: COLORS.pendingText };
-    if (status === "READY_TO_DELIVER")
-      return { bg: COLORS.ready, text: COLORS.readyText };
-    if (status === "REJECTED")
-      return { bg: COLORS.rejected, text: COLORS.rejectedText };
-    return { bg: "#EEE", text: "#333" };
+      Alert.alert(
+        "Success",
+        approved ? "Estimation approved" : "Estimation rejected"
+      );
+
+      fetchEstimations();
+    } catch (e) {
+      Alert.alert("Error", "Action failed");
+    }
   };
 
   /* LOADING */
@@ -161,12 +133,14 @@ const updateApproval = async (approved) => {
         style={styles.center}
       >
         <ActivityIndicator size="large" color="#FFF" />
-        <Text style={{ color: "#FFF", marginTop: 10 }}>Loading estimation…</Text>
+        <Text style={{ color: "#FFF", marginTop: 10 }}>
+          Loading estimations…
+        </Text>
       </LinearGradient>
     );
   }
 
-  if (!estimation) {
+  if (!estimations.length) {
     return (
       <View style={styles.center}>
         <Text>No estimation found</Text>
@@ -174,13 +148,40 @@ const updateApproval = async (approved) => {
     );
   }
 
-  const statusStyle = getStatusStyle(estimation.repairRequest.status);
+  /* MERGE LOGIC */
+  const firstEst = estimations[0];
+  const allItems = estimations.flatMap(e => e.items);
+  const grandTotal = estimations.reduce(
+    (sum, e) => sum + parseFloat(e.total),
+    0
+  );
+
+  // Latest pending estimation
+  const pendingEstimation = estimations
+    .filter(e => e.approved === null)
+    .slice(-1)[0];
+
+  const hasRejected = estimations.some(e=> e.approved === false);
+  const hasPending = estimations.some(e=>e.approved === null);
+
+let statusEnum = "ACCEPTED";
+let statusBg = COLORS.success;
+let statusColor = COLORS.white;
+
+if (hasRejected) {
+  statusEnum = "REJECTED";
+  statusBg = COLORS.rejected;
+  statusColor = COLORS.rejectedText;
+} else if (hasPending) {
+  statusEnum = "WAITING FOR APPROVAL";
+  statusBg = COLORS.pending;
+  statusColor = COLORS.pendingText;
+}
 
   return (
     <LinearGradient
       colors={[COLORS.gradientStart, COLORS.gradientEnd]}
-      style={styles.container}
-    >
+      style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.headerTitle}>Approve Estimation</Text>
 
@@ -188,26 +189,20 @@ const updateApproval = async (approved) => {
           {/* HEADER */}
           <View style={styles.cardHeader}>
             <Text style={styles.itemName}>
-              {estimation.repairRequest.itemName}
+              {firstEst.repairRequest.itemName}
             </Text>
 
-            <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
-              <Text style={[styles.statusText, { color: statusStyle.text }]}>
-                {estimation.repairRequest.status.replaceAll("_", " ")}
-              </Text>
-            </View>
           </View>
-
           {/* PROBLEM */}
           <View style={styles.problemBox}>
             <Text style={styles.problemLabel}>Problem</Text>
             <Text style={styles.problemText}>
-              {estimation.repairRequest.problemDescription}
+              {firstEst.repairRequest.problemDescription}
             </Text>
           </View>
 
           {/* ITEMS */}
-          {estimation.items.map((i: any) => (
+          {allItems.map(i => (
             <View key={i.id} style={styles.itemRow}>
               <View>
                 <Text style={styles.itemDesc}>{i.description}</Text>
@@ -222,47 +217,39 @@ const updateApproval = async (approved) => {
           {/* TOTAL */}
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalValue}>₹{estimation.total}</Text>
+            <Text style={styles.totalValue}>
+              ₹{grandTotal.toFixed(2)}
+            </Text>
           </View>
 
-          {/* INVOICE */}
-          {estimation.invoice?.pdfUrl && (
-            <TouchableOpacity
-              style={styles.invoiceBtn}
-              onPress={() =>
-                Linking.openURL(`${BACKEND_BASE_URL}${estimation.invoice.pdfUrl}`)
-              }
-            >
-              <Text style={styles.invoiceText}>📄 View Invoice</Text>
-            </TouchableOpacity>
-          )}
-
-          {/* ACTIONS */}
-          {estimation.repairRequest.status === "PENDING" && (
+          {/* ACTION BUTTONS */}
+          {pendingEstimation ? (
             <View style={styles.actionRow}>
               <TouchableOpacity
                 style={styles.acceptBtn}
-                onPress={() => updateApproval(true)}
+                onPress={() =>
+                  updateApproval(pendingEstimation.id, true)
+                }
               >
                 <Text style={styles.actionText}>✓ Accept</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.rejectBtn}
-                onPress={() => updateApproval(false)}
+                onPress={() =>
+                  updateApproval(pendingEstimation.id, false)
+                }
               >
                 <Text style={styles.actionText}>✕ Reject</Text>
               </TouchableOpacity>
             </View>
-          )}
-          {/* update status */}
-          {estimation.repairRequest.status !=="REJECTED" &&(
-            <TouchableOpacity style={styles.updateBtn}
-            onPress={()=>{
-              navigation.navigate("UpdateStatus",{
-                requestId: requestId,
-              });
-            }}>
+          ) : (
+            <TouchableOpacity
+              style={styles.updateBtn}
+              onPress={() =>
+                navigation.navigate("UpdateStatus", { requestId })
+              }
+            >
               <Text style={styles.updateBtnText}>Update Status</Text>
             </TouchableOpacity>
           )}
@@ -289,6 +276,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.cardBg,
     borderRadius: 20,
     padding: 18,
+    marginBottom: 20,
   },
 
   cardHeader: {
@@ -307,11 +295,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
-  },
-
-  statusText: {
-    fontSize: 11,
-    fontWeight: "700",
   },
 
   problemBox: {
@@ -354,16 +337,6 @@ const styles = StyleSheet.create({
   totalLabel: { fontWeight: "600" },
   totalValue: { fontSize: 20, fontWeight: "700" },
 
-  invoiceBtn: {
-    marginTop: 12,
-    padding: 12,
-    alignItems: "center",
-    backgroundColor: COLORS.sectionBg,
-    borderRadius: 12,
-  },
-
-  invoiceText: { color: COLORS.link, fontWeight: "600" },
-
   actionRow: {
     flexDirection: "row",
     gap: 10,
@@ -390,12 +363,14 @@ const styles = StyleSheet.create({
     color: "#FFF",
     fontWeight: "700",
   },
-    updateBtn: {
+
+  updateBtn: {
     backgroundColor: "#3ff7ba",
     paddingVertical: 16,
     borderRadius: 16,
     marginTop: 24,
   },
+
   updateBtnText: {
     textAlign: "center",
     fontSize: 17,
