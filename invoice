@@ -7,6 +7,8 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import { openWhatsApp } from "../utils/whatsapp";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "@react-navigation/native";
+import { useCallback } from "react";
 
 const LABELS={
   contactInfo:"Contact Info",
@@ -27,6 +29,7 @@ export default function Invoice() {
   const [message, setMessage] = useState("");
   const [pdfUrl, setPdfUrl] = useState("");
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [editMode,setEditMode] = useState(false)
   
 
   useLayoutEffect(() => {
@@ -42,7 +45,7 @@ export default function Invoice() {
     setLoading(true);
     setMessage("");
     setRepairData(null);
-
+    
     const query = `
       query ($requestId: String!) {
         repairRequest(requestId: $requestId) {
@@ -83,14 +86,15 @@ export default function Invoice() {
     }
   };
 
-  useEffect(() => {
+  useEffect(
+    useCallback(() => {
     if (!requestId) {
       Alert.alert("Request ID missing");
       navigation.goBack();
       return;
     }
     fetchDetails(requestId);
-  }, [requestId]);
+  }, [requestId]));
 
   const generateInvoice = async () => {
     if (!requestId || !totalAmount) {
@@ -131,6 +135,7 @@ export default function Invoice() {
       setPdfUrl(url);
       setShowWhatsAppModal(true);
       setMessage("Invoice generated successfully!");
+
     } catch (err: any) {
       setMessage(err.message || "Invoice generation failed");
     } finally {
@@ -225,6 +230,7 @@ Thank you for choosing our service.`
             {repairData && (
               <>
                 <Text style={styles.sectionTitle}>Invoice Preview</Text>
+                <Text >Edit</Text>
 
                 {/* DETAILS */}
                 <View style={styles.detailsSection}>
@@ -245,7 +251,7 @@ Thank you for choosing our service.`
                 <View style={styles.divider} />
 
                 <Text style={styles.subHeader}>Estimation Items</Text>
-
+                {editMode &&(
                 <View style={styles.tableHeader}>
                   <Text style={[styles.tableHeaderText, { flex: 2 }]}>
                     Description
@@ -267,6 +273,7 @@ Thank you for choosing our service.`
                     Amount
                   </Text>
                 </View>
+                )}
 
                 {repairData.estimations.map((est: any, ei: number) =>
                   est.items.map((item: any, i: number) => (
